@@ -19,12 +19,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-
       - name: Install FFmpeg (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
@@ -35,21 +29,37 @@ jobs:
 
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y
+        uses: AnimMouse/setup-ffmpeg@v1
 
       - name: Install Python deps
-        run: pip install -r requirements.txt pyinstaller
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            pip install pyobjc-framework-Cocoa
+          fi
+          pip install -r requirements.txt
 
       - name: Build executable
         run: pyinstaller GIM_RENDER.spec --noconfirm
 
-      - name: Create archive (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: cd dist && tar -czf ../GIM_RENDER-${{ runner.os }}.tar.gz GIM_RENDER
+      - name: Create archive (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          zip -r ../GIM_RENDER-macOS.zip GIM_RENDER.app efek assets
+
+      - name: Create archive (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd dist
+          tar -czf ../GIM_RENDER-Linux.tar.gz GIM_RENDER efek assets
 
       - name: Create archive (Windows)
         if: runner.os == 'Windows'
-        run: cd dist && 7z a ../GIM_RENDER-Windows.zip GIM_RENDER.exe efek assets
+        run: |
+          cd dist
+          7z a ../GIM_RENDER-Windows.zip GIM_RENDER.exe efek assets
 
       - uses: actions/upload-artifact@v4
         with:

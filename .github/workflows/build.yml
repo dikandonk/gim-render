@@ -32,13 +32,11 @@ jobs:
         uses: AnimMouse/setup-ffmpeg@v1
 
       - name: Install Python deps
-        run: |
-          pip install --upgrade pip
-          pip install pyinstaller
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            pip install pyobjc-framework-Cocoa
-          fi
-          pip install -r requirements.txt
+        run: pip install --upgrade pip pyinstaller -r requirements.txt
+
+      - name: Install PyObjC (macOS only)
+        if: runner.os == 'macOS'
+        run: pip install pyobjc-framework-Cocoa
 
       - name: Build executable
         run: pyinstaller GIM_RENDER.spec --noconfirm
@@ -47,7 +45,12 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           cd dist
-          zip -r ../GIM_RENDER-macOS.zip GIM_RENDER.app efek assets
+          if [ -d "GIM_RENDER.app" ]; then
+            zip -r ../GIM_RENDER-macOS.zip GIM_RENDER.app efek assets
+          else
+            cp -r ../efek ../assets .
+            zip -r ../GIM_RENDER-macOS.zip GIM_RENDER efek assets
+          fi
 
       - name: Create archive (Linux)
         if: runner.os == 'Linux'

@@ -7,9 +7,11 @@ from pathlib import Path
 block_cipher = None
 
 added_files = []
-if (Path(__file__).parent / "efek").exists():
+efek_dir = Path(SPECPATH) / "efek"
+assets_dir = Path(SPECPATH) / "assets"
+if efek_dir.exists():
     added_files.append(("efek", "efek"))
-if (Path(__file__).parent / "assets").exists():
+if assets_dir.exists():
     added_files.append(("assets", "assets"))
 
 hidden_imports = [

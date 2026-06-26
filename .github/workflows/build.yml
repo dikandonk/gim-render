@@ -64,6 +64,7 @@ jobs:
             mkdir -p GIM_RENDER.app/Contents/Resources
             cp -r ../efek GIM_RENDER.app/Contents/Resources/
             cp -r ../assets GIM_RENDER.app/Contents/Resources/
+            codesign --force --deep --sign - GIM_RENDER.app 2>/dev/null || true
             zip -r ../GIM_RENDER-macOS.zip GIM_RENDER.app
           else
             cp -r ../efek ../assets .

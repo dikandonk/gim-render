@@ -1,106 +1,125 @@
 # GIM RENDER
 
-Generate professional music visualizer videos from MP3 + cover image. Audio-reactive spectrum equalizer, overlay effects, and automatic AI metadata cleanup.
+Generate professional music visualizer videos from audio + cover image. Audio-reactive spectrum equalizer, overlay effects, lyrics sync, and YouTube download.
 
-## Installation
-
-### macOS
-
-```bash
-# 1. Install Python 3.12+ (if not installed)
-brew install python@3.14
-
-# 2. Install FFmpeg
-brew install ffmpeg
-
-# 3. Clone or copy the project
-cd musik
-
-# 4. Create virtual environment
-python3 -m venv .venv
-
-# 5. Activate venv
-source .venv/bin/activate
-
-# 6. Install dependencies
-pip install -r requirements.txt
-
-# 7. Run
-python3 main.py --gui-tk        # Native desktop GUI
-python3 main.py --gui           # Web GUI (open browser)
-python3 main.py song.mp3 cover.jpg   # CLI
-```
+## Quick Start
 
 ### Windows
-
-```powershell
-# 1. Install Python 3.12+ from https://python.org
-#    CHECK: "Add Python to PATH" during installation
-
-# 2. Install FFmpeg
-winget install ffmpeg
-
-# 3. Open Command Prompt or PowerShell, go to project folder
-cd musik
-
-# 4. Create virtual environment
-python -m venv .venv
-
-# 5. Activate venv
-.venv\Scripts\activate
-
-# 6. Install dependencies
-pip install -r requirements.txt
-
-# 7. Run
-python main.py --gui-tk         # Native desktop GUI
-python main.py --gui            # Web GUI (open browser)
-python main.py song.mp3 cover.jpg    # CLI
+```bash
+# Double-click run.bat — auto installs everything
+# Or via terminal:
+setup.bat
+run.bat
 ```
+
+### macOS / Linux
+```bash
+./setup.sh
+./run.sh
+```
+
+One-click scripts auto-detect Python, FFmpeg, and install dependencies automatically.
+
+## Manual Install
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # macOS/Linux
+# .venv\Scripts\activate    # Windows
+pip install -r requirements.txt
+```
+
+Also requires **FFmpeg**: `brew install ffmpeg` (Mac) / `winget install ffmpeg` (Win) / `apt install ffmpeg` (Linux).
 
 ## Usage
 
 ```bash
 # Single render
-python3 main.py song.mp3 cover.jpg
+python main.py song.mp3 cover.jpg
 
-# With options
-python3 main.py song.mp3 cover.jpg --fps 24 --resolution 1280x720 --crf 25
+# Desktop GUI (default)
+python main.py --gui-tk
+run.bat                    # Windows double-click
 
-# Render folder (auto-match MP3 with same-name image)
-python3 main.py --folder assets
+# Web GUI
+python main.py --gui
+run.bat web
 
-# Combine folder into one video
-python3 main.py --folder assets --combine -o output/mix.mp4
+# Folder batch
+python main.py --folder assets
+python main.py --folder assets --combine -o mix.mp4
 
-# Preview 10 seconds (via GUI button or CLI)
-# (use GUI for preview feature)
+# Multiple pairs
+python main.py --pair song1.mp3 img1.jpg song2.mp3 img2.jpg
+
+# With crossfade
+python main.py --folder assets --combine --fade 2
+
+# Lyrics sync
+python main.py song.mp3 cover.jpg --lrc lyrics.lrc
+
+# Watermark + slideshow
+python main.py song.mp3 cover.jpg --watermark-image logo.png --image-duration 10 --extra-images img2.jpg img3.jpg
+
+# WAV/FLAC/OGG audio input
+python main.py song.wav cover.jpg
 ```
 
-## Quick Options
+## CLI Flags
 
 | Flag | Default | Description |
-|---|---|---|
-| `--fps` | 30 | 24, 30, or 60 |
+|------|---------|-------------|
+| `--fps` | 24 | 24, 30, or 60 |
 | `--resolution` | 1280x720 | 1920x1080, 854x480, etc |
+| `--scale` | 0.5 | Internal render scale: 0.5 (fast), 0.75 (balanced), 1.0 (quality) |
+| `--fast-render` | off | Skip heavy per-frame effects |
 | `--crf` | 25 | 0 (lossless) - 51 (worst) |
-| `--fast-render` | off | Skip heavy effects |
-| `--overlay true` | off | Rain/snow effect |
-| `--normalize` | off | EBU R128 loudness norm |
-| `--video-encoder` | auto | libx264, h264_videotoolbox, etc |
+| `--video-encoder` | libx264 | auto, libx264, h264_videotoolbox, etc |
+| `--encoder-preset` | ultrafast | ultrafast through medium |
+| `--threads` | CPU cores | FFmpeg encoder threads |
+| `--bands` | 32 | 16-96 spectrum bands |
+| `--equalizer-bars` | 32 | 8-128 visible bars |
+| `--equalizer-style` | rounded | rounded, sharp, upward, line, mirror, waveform |
+| `--equalizer-color` | default | cyan, pink, amber, green, purple, white, blue, red, orange, teal, violet, lime |
+| `--image-effect` | flex | flex, bars, wave, dots, none (equalizer ring style) |
+| `--rotate-image` | off | Rotate circular artwork |
+| `--video-zoom` | off | Beat-reactive zoom effect |
+| `--overlay true` | off | Rain/snow overlay effect |
+| `--overlay-type` | rain | rain or snow |
+| `--overlay-thickness` | medium | thin, medium, or thick |
+| `--normalize` | off | 2-pass EBU R128 loudness normalization |
+| `--watermark-image` | none | Logo/image at top-right corner |
+| `--image-duration` | 0 | Switch artwork every N seconds (slideshow) |
+| `--extra-images` | none | Additional artwork for slideshow |
+| `--lrc` | none | Lyrics file (.lrc) for synced text |
+| `--fade` | 0 | Crossfade duration between combined tracks |
+| `--serial` | off | Disable parallel multi-core rendering |
+| `--encoder-label` | Gim Studio 22 | Metadata encoder label |
 
-## Features
+## GUI Features
 
-- Audio-reactive spectrum equalizer (circular + bars)
-- Rain/snow overlay effects
-- Video background support
-- Automatic AI metadata cleanup (Suno/Udio)
-- Queue/batch/combined rendering
-- Web GUI + native Tkinter GUI
-- Hardware encoder auto-detection
+- **Single Render** — one MP3 + image
+- **Multi Render** — batch folder with combine option
+- **Queue** — custom MP3+image pairs
+- **Download** — YouTube audio download + tempo 6x
+- **Settings** — all video/visual/encoding options in one tab
+
+### Visualizer Styles
+**Equalizer Ring:** flex, bars, wave, dots, none  
+**Spectrum Bars:** rounded, sharp, upward, line, mirror, waveform
+
+### Extra Features
+- Crossfade transitions between combined tracks
+- Watermark image (auto-resized, top-right)
+- Slideshow artwork with configurable interval
+- .lrc lyrics sync with fade transitions
+- YouTube download (yt-dlp) with optional tempo 6x
+- Light/dark theme toggle (persisted)
+- Render elapsed time display
+- WAV, FLAC, OGG, M4A audio input support
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.10+
 - FFmpeg
-- pip packages: see `requirements.txt`
+- pip: `moviepy`, `librosa`, `numpy`, `pillow`, `pillow-heif`, `mutagen`, `scipy`, `tqdm`, `yt-dlp`

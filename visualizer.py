@@ -47,6 +47,7 @@ class Visualizer:
         artwork_equalizer: bool = True,
         equalizer_color: str = "default",
         equalizer_bars: int = DEFAULT_BANDS,
+        equalizer_style: str = "rounded",
         video_zoom: bool = False,
         overlay_enabled: bool = False,
         overlay_type: str = DEFAULT_OVERLAY_TYPE,
@@ -56,13 +57,21 @@ class Visualizer:
         playlist_titles: list[str] | None = None,
         current_track_index: int | None = None,
         fast_render: bool = False,
+        internal_scale: float = 0.5,
+        watermark_path: Path | None = None,
+        extra_images: list[Path] | None = None,
+        image_duration: float = 0.0,
+        lrc_path: Path | None = None,
         progress_callback=None,
     ) -> None:
         self.image_path = image_path
         self.mp3_path = mp3_path
         self.metadata = metadata
         self.background_path = background_path or image_path
-        self.width, self.height = resolution
+        self.out_width, self.out_height = resolution
+        self._internal_scale = internal_scale
+        self.width = int(self.out_width * self._internal_scale)
+        self.height = int(self.out_height * self._internal_scale)
         self.fps = fps
         self.bands = bands
         self.rotate_image = rotate_image
@@ -70,6 +79,7 @@ class Visualizer:
         self.artwork_equalizer = artwork_equalizer
         self.equalizer_color = equalizer_color
         self.equalizer_bars = equalizer_bars
+        self.equalizer_style = equalizer_style
         self.video_zoom = video_zoom
         self.overlay_enabled = overlay_enabled
         self.overlay_type = overlay_type if overlay_type in OVERLAY_TYPES else DEFAULT_OVERLAY_TYPE
@@ -82,17 +92,48 @@ class Visualizer:
         self.playlist_titles = playlist_titles or []
         self.current_track_index = current_track_index
         self.progress_callback = progress_callback
+        self.watermark = None
+        if watermark_path and watermark_path.exists():
+            wm = Image.open(str(watermark_path)).convert("RGBA")
+            wm_w, wm_h = max(40, int(self.out_width * 0.08)), int(self.out_height * 0.06)
+            wm = wm.resize((wm_w, wm_h), Image.Resampling.LANCZOS)
+            alpha = wm.split()[3].point(lambda v: min(v, 120)) if wm.mode == "RGBA" else None
+            if alpha:
+                wm.putalpha(alpha)
+            self.watermark = wm
+        self.image_duration = image_duration
+        self.lrc_lines: list[tuple[float, str]] = []
+        if lrc_path and lrc_path.exists():
+            self._load_lrc(lrc_path)
         self.background_clip = None
         self.overlay_clip = None
         self.overlay_path = overlay_asset_path(self.overlay_type, self.overlay_thickness) if self.overlay_enabled else None
         self.background_is_video = is_video_path(self.background_path)
         self.analysis = AudioAnalysis(mp3_path, fps=fps, bands=bands)
-        self.background = self._prepare_background(self.background_path, resolution)
+        self.background = self._prepare_background(self.background_path, (self.width, self.height))
         self.background_rgba = self.background.convert("RGBA")
         if self.overlay_enabled:
             self.overlay_clip = self._prepare_overlay_clip()
+        if not self.background_is_video:
+            self.background_rgb = self.background_rgba.convert("RGB")
         self.vignette = self._prepare_vignette()
+        if not self.background_is_video:
+            self.background_rgba.alpha_composite(self.vignette)
+            self.background_rgb = self.background_rgba.convert("RGB")
         self.artwork = circular_artwork(image_path, int(min(self.width, self.height) * 0.42))
+        self._artworks = [self.artwork]
+        if extra_images:
+            for p in extra_images:
+                if p.exists():
+                    self._artworks.append(circular_artwork(p, int(min(self.width, self.height) * 0.42)))
+        if not self.fast_render:
+            shadow_base = max(self.artwork.width, self.artwork.height) + 28
+            self._artwork_shadow = Image.new("RGBA", (shadow_base, shadow_base), (0, 0, 0, 0))
+            shadow_draw = ImageDraw.Draw(self._artwork_shadow)
+            half = shadow_base // 2
+            radius = min(self.artwork.width, self.artwork.height) // 2
+            shadow_draw.ellipse((half - radius, half - radius, half + radius, half + radius), fill=(0, 0, 0, 90))
+            self._artwork_shadow = self._artwork_shadow.filter(ImageFilter.GaussianBlur(radius=10))
         self.resize_filter = Image.Resampling.BILINEAR if fast_render else Image.Resampling.LANCZOS
         self.rotate_filter = Image.Resampling.BILINEAR if fast_render else Image.Resampling.BICUBIC
         self.font_large = self._font(38)
@@ -100,7 +141,14 @@ class Visualizer:
         self.font_playlist_bold = self._font(24, bold=True)
         self.visual_spectrum = np.zeros(self.bands, dtype=np.float32)
         self.frame_bar = tqdm(total=self.analysis.frame_count, desc="Rendering frames")
+        self._tqdm_pending = 0
         self.last_frame_index = -1
+        self._video_blur_counter = 0
+        self._cached_bg_raw = None
+        self._cached_bg_time = -1.0
+        self._last_zoom = 1.0
+        self._eq_overlay = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
+        self._eq_glow = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
 
     @staticmethod
     def _font(size: int, bold: bool = False) -> ImageFont.ImageFont:
@@ -108,16 +156,28 @@ class Visualizer:
         if bold:
             candidates.extend(
                 [
+                    # macOS
                     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
                     "/Library/Fonts/Arial Bold.ttf",
+                    # Windows
+                    "C:/Windows/Fonts/arialbd.ttf",
+                    # Linux
                     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                    "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+                    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
                 ]
             )
         candidates.extend(
             [
+                # macOS
                 "/System/Library/Fonts/Supplemental/Arial.ttf",
                 "/Library/Fonts/Arial.ttf",
+                # Windows
+                "C:/Windows/Fonts/arial.ttf",
+                # Linux
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
             ]
         )
         for candidate in candidates:
@@ -132,8 +192,11 @@ class Visualizer:
             max(0, int(time_seconds * self.fps)),
         )
         if frame_index > self.last_frame_index:
-            self.frame_bar.update(frame_index - self.last_frame_index)
+            self._tqdm_pending += frame_index - self.last_frame_index
             self.last_frame_index = frame_index
+            if self._tqdm_pending >= 30:
+                self.frame_bar.update(self._tqdm_pending)
+                self._tqdm_pending = 0
             if self.progress_callback:
                 value = (frame_index + 1) / max(1, self.analysis.frame_count)
                 try:
@@ -143,23 +206,36 @@ class Visualizer:
 
         energy, spectrum = self.analysis.at(time_seconds)
         self.visual_spectrum = self.visual_spectrum * 0.72 + spectrum * 0.28
-        image = self._background(energy, global_time)
+        silent = energy < 0.004
+        image = self._background(energy, global_time).convert("RGBA")
         draw = ImageDraw.Draw(image, "RGBA")
 
         self._draw_overlay(image, global_time, energy)
         self._draw_artwork(image, energy, spectrum, global_time)
-        self._draw_equalizer(draw, self.visual_spectrum, energy)
+        if not silent:
+            self._draw_equalizer(draw, self.visual_spectrum, energy, time_seconds)
         if self.playlist_titles:
             self._draw_text(draw)
         self._draw_playlist(draw)
+        self._draw_lrc(draw, global_time)
         self._draw_vignette(image)
 
         if self.video_zoom:
             image = self._apply_video_zoom(image, energy, global_time)
 
-        return np.asarray(image, dtype=np.uint8)
+        if self.watermark:
+            wm_w, wm_h = self.watermark.size
+            wx = self.width - wm_w - 16
+            wy = 12
+            image.paste(self.watermark, (wx, wy), self.watermark)
+
+        if self._internal_scale < 1.0:
+            image = image.resize((self.out_width, self.out_height), Image.Resampling.BILINEAR)
+        return np.asarray(image.convert("RGB"), dtype=np.uint8)
 
     def close(self) -> None:
+        if self._tqdm_pending:
+            self.frame_bar.update(self._tqdm_pending)
         if self.last_frame_index < self.analysis.frame_count - 1:
             self.frame_bar.update(self.analysis.frame_count - 1 - self.last_frame_index)
         self.frame_bar.close()
@@ -234,19 +310,28 @@ class Visualizer:
 
     def _background(self, energy: float, time_seconds: float) -> Image.Image:
         if self.background_is_video:
-            base = self._fit_background_frame(self._background_video_frame(time_seconds), (self.width, self.height)).convert("RGBA")
-            if self.fast_render:
-                base = base.filter(ImageFilter.GaussianBlur(radius=1))
+            if self._cached_bg_raw is not None and abs(time_seconds - self._cached_bg_time) < 0.04:
+                base = self._cached_bg_raw.copy()
             else:
-                base = base.filter(ImageFilter.GaussianBlur(radius=3))
+                base = self._fit_background_frame(self._background_video_frame(time_seconds), (self.width, self.height)).convert("RGBA")
+                self._cached_bg_raw = base.copy()
+                self._cached_bg_time = time_seconds
+            self._video_blur_counter += 1
+            if self._video_blur_counter % 2 == 0:
+                radius = 1 if self.fast_render else 3
+                half_w, half_h = max(1, self.width // 2), max(1, self.height // 2)
+                small = base.resize((half_w, half_h), Image.Resampling.BILINEAR)
+                small = small.filter(ImageFilter.GaussianBlur(radius=radius))
+                base = small.resize((self.width, self.height), Image.Resampling.BILINEAR)
             base.alpha_composite(Image.new("RGBA", base.size, (5, 8, 13, 82)))
             image = base
         else:
-            image = self.background_rgba.copy()
+            image = self.background_rgb.copy()
         if not self.fast_render and energy > 0.02:
             pulse = int(energy * 28)
-            image.alpha_composite(Image.new("RGBA", image.size, (255, 255, 255, pulse)))
-        return image.convert("RGB")
+            pulse_layer = Image.new("RGB", image.size, (255, 255, 255))
+            image = Image.blend(image, pulse_layer, pulse / 255.0)
+        return image
 
     def _apply_video_zoom(self, image: Image.Image, energy: float, time_seconds: float) -> Image.Image:
         zoom = 1.0 + energy * 0.025
@@ -257,6 +342,9 @@ class Visualizer:
             zoom = min(1.08, zoom)
         if zoom <= 1.001:
             return image
+        if abs(zoom - self._last_zoom) < 0.003:
+            return image
+        self._last_zoom = zoom
         new_width = max(1, int(round(self.width * zoom)))
         new_height = max(1, int(round(self.height * zoom)))
         scaled = image.resize((new_width, new_height), self.resize_filter)
@@ -270,16 +358,22 @@ class Visualizer:
         overlay = self._overlay_frame(time_seconds)
         if overlay is None:
             return
-        image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"))
+        image.alpha_composite(overlay)
 
     def _draw_artwork(self, image: Image.Image, energy: float, spectrum: np.ndarray, time_seconds: float) -> None:
+        if self.image_duration > 0 and len(self._artworks) > 1:
+            idx = int(time_seconds / self.image_duration) % len(self._artworks)
+            current_artwork = self._artworks[idx]
+        else:
+            current_artwork = self.artwork
+
         pulse = 1.0 + energy * 0.055 + math.sin(time_seconds * 1.4) * 0.01
-        size = int(self.artwork.width * pulse)
+        size = int(current_artwork.width * pulse)
         if self.rotate_image:
             angle = -(time_seconds * 18.0 + energy * 10.0)
-            artwork = self.artwork.rotate(angle, resample=self.rotate_filter)
+            artwork = current_artwork.rotate(angle, resample=self.rotate_filter)
         else:
-            artwork = self.artwork
+            artwork = current_artwork
         if size != artwork.width:
             artwork = artwork.resize((size, size), self.resize_filter)
         x = (self.width - size) // 2
@@ -288,10 +382,11 @@ class Visualizer:
         if self.fast_render:
             ImageDraw.Draw(image, "RGBA").ellipse((x - 5, y - 5, x + size + 5, y + size + 5), fill=(0, 0, 0, 70))
         else:
-            shadow = Image.new("RGBA", (size + 28, size + 28), (0, 0, 0, 0))
-            shadow_draw = ImageDraw.Draw(shadow)
-            shadow_draw.ellipse((14, 14, size + 14, size + 14), fill=(0, 0, 0, 90))
-            shadow = shadow.filter(ImageFilter.GaussianBlur(radius=10))
+            shadow_size = size + 28
+            if shadow_size != self._artwork_shadow.width:
+                shadow = self._artwork_shadow.resize((shadow_size, shadow_size), Image.Resampling.BILINEAR)
+            else:
+                shadow = self._artwork_shadow
             image.paste(shadow, (x - 14, y - 14), shadow)
         self._draw_artwork_equalizer(image, x, y, size, spectrum, energy, time_seconds)
         image.paste(artwork, (x, y), artwork)
@@ -308,40 +403,43 @@ class Visualizer:
     ) -> None:
         if self.image_effect == "none" or not self.artwork_equalizer:
             return
+        if energy < 0.003:
+            return
 
         center_x = x + size / 2
         center_y = y + size / 2
         base_radius = size / 2
         outer_padding = 10 if self.fast_render else 15
-        band_count = max(72, max(8, self.equalizer_bars) * 8)
+        rotation = time_seconds * (1.8 + energy * 1.1)
+        band_count = max(72, min(180, max(8, self.equalizer_bars) * 6))
         raw_values = np.interp(np.linspace(0, len(spectrum) - 1, band_count), np.arange(len(spectrum)), spectrum)
         smooth_values = smooth(raw_values.astype(np.float32), 2 if self.fast_render else 3)
         smooth_values = smooth(smooth_values, 1 if self.fast_render else 2)
-        rotation = time_seconds * (1.8 + energy * 1.1)
 
-        overlay = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
-        glow_overlay = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
+        if self.image_effect in ("bars", "wave", "dots"):
+            self._draw_eq_style(image, center_x, center_y, base_radius, outer_padding, smooth_values, energy, rotation, band_count)
+            return
+
+        # flex: polygon ring (default)
+        overlay = self._eq_overlay
+        glow_overlay = self._eq_glow
+        overlay.paste((0, 0, 0, 0), (0, 0, self.width, self.height))
+        glow_overlay.paste((0, 0, 0, 0), (0, 0, self.width, self.height))
         overlay_draw = ImageDraw.Draw(overlay, "RGBA")
         glow_draw = ImageDraw.Draw(glow_overlay, "RGBA")
 
         inner_radius = base_radius
         outer_points = []
         inner_points = []
-
         for idx, value in enumerate(smooth_values):
             angle = (idx / band_count) * math.tau + rotation
-            eased = min(1.0, max(0.0, float(value)))
-            eased = eased ** 1.15
+            eased = min(1.0, max(0.0, float(value))) ** 1.15
             pulse = 1.0 + energy * 0.55
-            outer = base_radius + outer_padding * eased * pulse
-            if self.image_effect == "flex":
-                outer *= 1.05
+            outer = base_radius + outer_padding * eased * pulse * 1.05
             dx = math.cos(angle)
             dy = math.sin(angle)
-            outer_point = (center_x + dx * outer, center_y + dy * outer)
-            inner_point = (center_x + dx * inner_radius, center_y + dy * inner_radius)
-            outer_points.append(outer_point)
-            inner_points.append(inner_point)
+            outer_points.append((center_x + dx * outer, center_y + dy * outer))
+            inner_points.append((center_x + dx * inner_radius, center_y + dy * inner_radius))
 
         fill_color = self._equalizer_color(0.5, energy)
         fill_alpha = 130 if self.fast_render else 175
@@ -358,10 +456,67 @@ class Visualizer:
         edge_width = 2 if self.fast_render else 3
         overlay_draw.line(outer_points + [outer_points[0]], fill=edge_color, width=edge_width)
 
-        image.paste(Image.alpha_composite(image.convert("RGBA"), glow_overlay).convert("RGB"))
-        image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"))
+        image.alpha_composite(glow_overlay)
+        image.alpha_composite(overlay)
 
-    def _draw_equalizer(self, draw: ImageDraw.ImageDraw, spectrum: np.ndarray, energy: float) -> None:
+    def _draw_eq_style(self, image, cx, cy, base_r, pad, values, energy, rotation, count):
+        overlay = self._eq_overlay
+        overlay.paste((0, 0, 0, 0), (0, 0, self.width, self.height))
+        draw = ImageDraw.Draw(overlay, "RGBA")
+
+        if self.image_effect == "bars":
+            bar_count = min(count, self.equalizer_bars)
+            step = count // bar_count
+            for i in range(bar_count):
+                idx = i * step
+                value = float(values[idx])
+                eased = min(1.0, max(0.0, value)) ** 1.2
+                angle = (idx / count) * math.tau + rotation
+                bar_h = max(2, int(eased * pad * 2.5 + energy * 10))
+                bar_w = max(2, int(base_r * 0.08))
+                dx = math.cos(angle)
+                dy = math.sin(angle)
+                r0 = base_r + pad * 0.3
+                r1 = r0 + bar_h
+                inner = (cx + dx * r0, cy + dy * r0)
+                outer = (cx + dx * r1, cy + dy * r1)
+                color = self._equalizer_color(i / max(1, bar_count - 1), energy)
+                draw.line([inner, outer], fill=color, width=bar_w)
+
+        elif self.image_effect == "wave":
+            points = []
+            for idx in range(count):
+                angle = (idx / count) * math.tau + rotation
+                value = float(values[idx])
+                eased = min(1.0, max(0.0, value)) ** 1.3
+                r = base_r + pad * 0.5 + eased * pad * 2.0 + energy * 12
+                dx = math.cos(angle)
+                dy = math.sin(angle)
+                points.append((cx + dx * r, cy + dy * r))
+            color = self._equalizer_color(0.5, energy)
+            alpha = 160 if self.fast_render else 200
+            draw.line(points + [points[0]], fill=(color[0], color[1], color[2], alpha), width=3 if self.fast_render else 4)
+
+        elif self.image_effect == "dots":
+            dot_count = min(count // 3, 80)
+            step = max(1, count // dot_count)
+            for i in range(dot_count):
+                idx = (i * step + int(rotation * 10)) % count
+                value = float(values[idx])
+                eased = min(1.0, max(0.0, value))
+                angle = (idx / count) * math.tau
+                r = base_r + pad * 0.5 + eased * pad * 3.0 + energy * 15
+                dx = math.cos(angle)
+                dy = math.sin(angle)
+                px = cx + dx * r
+                py = cy + dy * r
+                dot_r = max(2, int(3 + eased * 6))
+                color = self._equalizer_color(i / max(1, dot_count - 1), energy)
+                draw.ellipse((px - dot_r, py - dot_r, px + dot_r, py + dot_r), fill=color)
+
+        image.alpha_composite(overlay)
+
+    def _draw_equalizer(self, draw: ImageDraw.ImageDraw, spectrum: np.ndarray, energy: float, time_seconds: float = 0.0) -> None:
         margin = int(self.width * 0.12)
         center_y = int(self.height * 0.86)
         max_height = int(self.height * 0.135)
@@ -380,6 +535,33 @@ class Visualizer:
         )
 
         values = np.interp(np.linspace(0, len(spectrum) - 1, bar_count), np.arange(len(spectrum)), spectrum)
+        style = self.equalizer_style
+
+        if style == "waveform":
+            self._draw_waveform(draw, start_x, total_width, center_y, max_height, energy, time_seconds)
+            return
+
+        if style == "line":
+            points = []
+            for idx in range(bar_count):
+                value = float(values[idx])
+                weighted = min(1.0, max(0.0, value)) ** 1.35 * (0.78 + energy * 0.42)
+                bh = int(weighted * max_height)
+                x0 = start_x + idx * (bar_width + gap) + bar_width // 2
+                y0 = center_y - bh // 2
+                points.append((x0, y0))
+            for idx in range(bar_count - 1, -1, -1):
+                value = float(values[idx])
+                weighted = min(1.0, max(0.0, value)) ** 1.35 * (0.78 + energy * 0.42)
+                bh = int(weighted * max_height)
+                x0 = start_x + idx * (bar_width + gap) + bar_width // 2
+                y1 = center_y + bh // 2
+                points.append((x0, y1))
+            color = self._equalizer_color(0.5, energy)
+            draw.polygon(points, fill=(color[0], color[1], color[2], 100))
+            draw.line(points + [points[0]], fill=(color[0], color[1], color[2], 200), width=1)
+            return
+
         for idx, value in enumerate(values):
             distance = abs((idx / max(1, bar_count - 1)) - 0.5) * 2
             center_bias = 1.0 - distance * 0.18
@@ -392,17 +574,55 @@ class Visualizer:
             hue = idx / max(1, bar_count - 1)
             color = self._equalizer_color(hue, energy)
             radius = max(2, bar_width // 2)
-            if not self.fast_render:
+
+            if style == "mirror":
+                y0 = center_y - bar_height
+                y1 = center_y + bar_height
+            elif style == "upward":
+                y0 = center_y - bar_height
+                y1 = center_y
+
+            use_radius = radius if style != "sharp" else 0
+
+            if not self.fast_render and style != "sharp":
                 glow = (color[0], color[1], color[2], 30)
-                draw.rounded_rectangle((x0 - 1, y0 - 2, x1 + 1, y1 + 2), radius=radius, fill=glow)
-            draw.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=color)
-            if not self.fast_render:
+                draw.rounded_rectangle((x0 - 1, y0 - 2, x1 + 1, y1 + 2), radius=use_radius, fill=glow)
+            draw.rounded_rectangle((x0, y0, x1, y1), radius=use_radius, fill=color)
+            if not self.fast_render and style != "sharp":
                 highlight_height = max(1, min(4, bar_height // 6))
                 draw.rounded_rectangle(
                     (x0, y0, x1, y0 + highlight_height),
-                    radius=radius,
+                    radius=use_radius,
                     fill=(255, 255, 255, 58),
                 )
+
+    def _draw_waveform(self, draw: ImageDraw.ImageDraw, x_start: int, total_width: int, cy: int, max_h: int, energy: float, t: float) -> None:
+        sr = self.analysis.sr
+        samples = self.analysis.y
+        sample_count = len(samples)
+        duration = sample_count / sr
+        center_sample = int(t * sr)
+        window_samples = max(200, int(sr * 0.08))
+        start = max(0, center_sample - window_samples)
+        end = min(sample_count, center_sample + window_samples)
+        chunk = samples[start:end]
+        if len(chunk) < 4:
+            return
+
+        points = []
+        step = max(1, len(chunk) // total_width)
+        for i in range(0, total_width):
+            idx = i * step
+            if idx >= len(chunk):
+                break
+            val = float(chunk[min(idx, len(chunk) - 1)])
+            y = cy - int(val * max_h * 1.5)
+            points.append((x_start + i, y))
+
+        if points:
+            color = self._equalizer_color(0.5, energy)
+            alpha = 140 if self.fast_render else 200
+            draw.line(points, fill=(color[0], color[1], color[2], alpha), width=2 if self.fast_render else 3)
 
     def _equalizer_color(self, position: float, energy: float) -> tuple[int, int, int, int]:
         palettes = {
@@ -488,5 +708,38 @@ class Visualizer:
             trimmed = trimmed[:-1]
         return (trimmed + ellipsis) if trimmed else ellipsis
 
+    def _load_lrc(self, path: Path) -> None:
+        import re
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.findall(r"\[(\d+):(\d+\.\d+)\]", line)
+                if m:
+                    text = re.sub(r"\[\d+:\d+\.\d+\]", "", line).strip()
+                    if text:
+                        minutes, seconds = m[-1]
+                        t = int(minutes) * 60 + float(seconds)
+                        self.lrc_lines.append((t, text))
+        self.lrc_lines.sort()
+
+    def _draw_lrc(self, draw: ImageDraw.ImageDraw, time_seconds: float) -> None:
+        if not self.lrc_lines:
+            return
+        for i in range(len(self.lrc_lines) - 1, -1, -1):
+            if time_seconds >= self.lrc_lines[i][0]:
+                text = self.lrc_lines[i][1]
+                bbox = draw.textbbox((0, 0), text, font=self.font_large)
+                x = (self.width - (bbox[2] - bbox[0])) // 2
+                y = int(self.height * 0.78)
+                draw.text((x + 2, y + 2), text, font=self.font_large, fill=(0, 0, 0, 140))
+                draw.text((x, y), text, font=self.font_large, fill=(255, 255, 255, 210))
+                next_t = self.lrc_lines[i + 1][0] if i + 1 < len(self.lrc_lines) else time_seconds + 5
+                remaining = next_t - time_seconds
+                if remaining < 0.3:
+                    alpha = max(0, int(255 * remaining / 0.3))
+                    draw.text((x, y), text, font=self.font_large, fill=(255, 255, 255, alpha))
+                return
+
     def _draw_vignette(self, image: Image.Image) -> None:
-        image.paste(Image.alpha_composite(image.convert("RGBA"), self.vignette).convert("RGB"))
+        if not self.background_is_video:
+            return
+        image.alpha_composite(self.vignette)

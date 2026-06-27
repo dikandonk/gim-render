@@ -41,9 +41,9 @@ from utils import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="GIM RENDER — Generate a music visualizer MP4 from an MP3 and cover image.",
+        description="GIM RENDER — Generate a music visualizer MP4 from an audio file and cover image.",
     )
-    parser.add_argument("mp3", type=Path, nargs="?", help="Input MP3 file")
+    parser.add_argument("mp3", type=Path, nargs="?", help="Input audio file (MP3, WAV, FLAC, etc.)")
     parser.add_argument("image", type=Path, nargs="?", help="Cover image, JPG or PNG")
     parser.add_argument("--gui", action="store_true", help="Open the web-based graphical interface")
     parser.add_argument("--gui-tk", action="store_true", help="Open the native Tkinter graphical interface")
@@ -80,9 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--image-effect",
-        choices=["none", "flex"],
+        choices=["none", "flex", "bars", "wave", "dots"],
         default="flex",
-        help="Artwork border effect, default flex",
+        help="Equalizer ring style around artwork: flex, bars, wave, dots, none",
     )
     parser.add_argument(
         "--artwork-equalizer",
@@ -104,6 +104,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=range(8, 129),
         metavar="8-128",
         help="Number of equalizer bars, default 32",
+    )
+    parser.add_argument(
+        "--equalizer-style",
+        choices=["rounded", "sharp", "upward", "line", "mirror", "waveform"],
+        default="rounded",
+        help="Spectrum bars style: rounded, sharp, upward, line, mirror",
     )
     parser.add_argument(
         "--video-zoom",
@@ -137,6 +143,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip heavier per-frame effects for faster rendering",
     )
     parser.add_argument(
+        "--scale",
+        type=float,
+        default=0.5,
+        choices=[0.5, 0.75, 1.0],
+        metavar="0.5|0.75|1.0",
+        help="Internal render scale: 0.5=fast, 0.75=balanced, 1.0=quality (default)",
+    )
+    parser.add_argument(
+        "--watermark-image",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Optional watermark image (small logo at top-right corner)",
+    )
+    parser.add_argument(
+        "--extra-images",
+        nargs="*",
+        type=Path,
+        default=[],
+        metavar="PATH",
+        help="Additional artwork images for slideshow effect",
+    )
+    parser.add_argument(
+        "--image-duration",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="Switch artwork every N seconds (0 = no slideshow)",
+    )
+    parser.add_argument(
+        "--lrc",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Lyrics file (.lrc) for synced text display",
+    )
+    parser.add_argument(
+        "--fade",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="Crossfade duration between combined tracks (0=no crossfade)",
+    )
+    parser.add_argument(
         "--encoder-preset",
         choices=["ultrafast", "superfast", "veryfast", "faster", "fast", "medium"],
         default=DEFAULT_ENCODER_PRESET,
@@ -149,6 +199,16 @@ def build_parser() -> argparse.ArgumentParser:
         choices=range(0, 52),
         metavar="0-51",
         help=f"x264 CRF quality (0 lossless - 51 worst), lower = better quality + larger file, default {DEFAULT_CRF}",
+    )
+    parser.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Normalize audio to EBU R128 loudness standard before rendering",
+    )
+    parser.add_argument(
+        "--serial",
+        action="store_true",
+        help="Disable parallel rendering, process audio in a single thread",
     )
     parser.add_argument(
         "--video-encoder",
@@ -181,6 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--segment-artwork-equalizer", type=parse_bool, help=argparse.SUPPRESS)
     parser.add_argument("--segment-equalizer-color", help=argparse.SUPPRESS)
     parser.add_argument("--segment-equalizer-bars", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--segment-equalizer-style", help=argparse.SUPPRESS)
     parser.add_argument("--segment-video-zoom", type=parse_bool, help=argparse.SUPPRESS)
     parser.add_argument("--segment-overlay-enabled", type=parse_bool, help=argparse.SUPPRESS)
     parser.add_argument("--segment-overlay-type", help=argparse.SUPPRESS)
@@ -188,6 +249,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--segment-time-offset", type=float, help=argparse.SUPPRESS)
     parser.add_argument("--segment-timeline-duration", type=float, help=argparse.SUPPRESS)
     parser.add_argument("--segment-fast-render", type=parse_bool, help=argparse.SUPPRESS)
+    parser.add_argument("--segment-internal-scale", type=float, help=argparse.SUPPRESS)
+    parser.add_argument("--segment-watermark", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--segment-image-duration", type=float, help=argparse.SUPPRESS)
     parser.add_argument("--segment-encoder-preset", help=argparse.SUPPRESS)
     parser.add_argument("--segment-threads", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--segment-video-encoder", help=argparse.SUPPRESS)
@@ -219,6 +283,7 @@ def main() -> int:
             artwork_equalizer=bool(args.segment_artwork_equalizer),
             equalizer_color=args.segment_equalizer_color or "default",
             equalizer_bars=args.segment_equalizer_bars or DEFAULT_BANDS,
+            equalizer_style=args.segment_equalizer_style or "rounded",
             video_zoom=bool(args.segment_video_zoom),
             overlay_enabled=bool(args.segment_overlay_enabled),
             overlay_type=args.segment_overlay_type or DEFAULT_OVERLAY_TYPE,
@@ -228,6 +293,9 @@ def main() -> int:
             playlist_titles=playlist_titles,
             current_track_index=args.segment_current_track_index,
             fast_render=bool(args.segment_fast_render),
+            internal_scale=args.segment_internal_scale or 0.5,
+            watermark_path=args.segment_watermark or None,
+            image_duration=args.segment_image_duration or 0.0,
             encoder_preset=args.segment_encoder_preset if args.segment_encoder_preset in ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium") else DEFAULT_ENCODER_PRESET,
             threads=max(1, args.segment_threads or DEFAULT_THREADS),
             video_encoder=args.segment_video_encoder or DEFAULT_VIDEO_ENCODER,
@@ -236,6 +304,18 @@ def main() -> int:
             parallelize=False,
         )
         return 0
+
+    if args.gui or args.gui_tk:
+        import subprocess as _sp
+        try:
+            _sp.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        except (FileNotFoundError, _sp.CalledProcessError):
+            parser.exit(1,
+                "FFmpeg is not found on your system PATH.\n\n"
+                "Install it first:\n"
+                "  macOS:   brew install ffmpeg\n"
+                "  Windows: winget install ffmpeg\n"
+                "  Linux:   sudo apt install ffmpeg\n")
 
     if args.gui:
         from gui import launch_gui
@@ -268,6 +348,7 @@ def main() -> int:
                     artwork_equalizer=args.artwork_equalizer,
                     equalizer_color=args.equalizer_color,
                     equalizer_bars=args.equalizer_bars,
+                    equalizer_style=args.equalizer_style,
                     video_zoom=args.video_zoom,
                     overlay_enabled=args.overlay,
                     overlay_type=args.overlay_type,
@@ -277,7 +358,15 @@ def main() -> int:
                     threads=args.threads,
                     video_encoder=args.video_encoder,
                     crf=args.crf,
-            encoder_label=args.encoder_label,
+                    encoder_label=args.encoder_label,
+                    normalize=args.normalize,
+                    internal_scale=args.scale,
+                    watermark_path=args.watermark_image,
+                    extra_images=args.extra_images or None,
+                    image_duration=args.image_duration,
+                    lrc_path=args.lrc,
+                    fade_duration=args.fade,
+                    parallelize=not args.serial,
                 )
                 print(f"Created {created_video}")
                 return 0
@@ -302,7 +391,14 @@ def main() -> int:
                 threads=args.threads,
                 video_encoder=args.video_encoder,
                 crf=args.crf,
-            encoder_label=args.encoder_label,
+                encoder_label=args.encoder_label,
+                normalize=args.normalize,
+                internal_scale=args.scale,
+                watermark_path=args.watermark_image,
+                extra_images=args.extra_images or None,
+                image_duration=args.image_duration,
+                lrc_path=args.lrc,
+                parallelize=not args.serial,
             )
         except ValueError as exc:
             parser.exit(1, f"{exc}\n")
@@ -337,6 +433,13 @@ def main() -> int:
             video_encoder=args.video_encoder,
             crf=args.crf,
             encoder_label=args.encoder_label,
+            normalize=args.normalize,
+            internal_scale=args.scale,
+            watermark_path=args.watermark_image,
+            extra_images=args.extra_images or None,
+            image_duration=args.image_duration,
+            lrc_path=args.lrc,
+            parallelize=not args.serial,
         )
         print("Created:")
         for path in created:
@@ -344,9 +447,9 @@ def main() -> int:
         return 0
 
     if args.mp3 is None or args.image is None:
-        parser.error("mp3 and image are required unless --gui, --folder, or --pair is used")
+        parser.error("audio and image are required unless --gui, --folder, or --pair is used")
     if not args.mp3.exists():
-        parser.error(f"MP3 file not found: {args.mp3}")
+        parser.error(f"Audio file not found: {args.mp3}")
     if not args.image.exists():
         parser.error(f"Image file not found: {args.image}")
 
@@ -372,7 +475,14 @@ def main() -> int:
         threads=args.threads,
         video_encoder=args.video_encoder,
         crf=args.crf,
-            encoder_label=args.encoder_label,
+        encoder_label=args.encoder_label,
+        normalize=args.normalize,
+        internal_scale=args.scale,
+        watermark_path=args.watermark_image,
+        extra_images=args.extra_images or None,
+        image_duration=args.image_duration,
+        lrc_path=args.lrc,
+        parallelize=not args.serial,
     )
     print(f"Created {output_path}")
     return 0

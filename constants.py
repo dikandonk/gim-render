@@ -5,12 +5,12 @@ from __future__ import annotations
 import os
 
 DEFAULT_RESOLUTION = (1280, 720)
-DEFAULT_FPS = 30
+DEFAULT_FPS = 24
 DEFAULT_BANDS = 32
 DEFAULT_ENCODER_PRESET = "ultrafast"
 DEFAULT_CRF = 25
 DEFAULT_THREADS = max(1, os.cpu_count() or 4)
-DEFAULT_VIDEO_ENCODER = "auto"
+DEFAULT_VIDEO_ENCODER = "libx264"
 DEFAULT_OVERLAY_TYPE = "rain"
 DEFAULT_OVERLAY_THICKNESS = "medium"
 

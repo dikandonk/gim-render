@@ -36,12 +36,12 @@ def _tag_text(tags: object, key: str) -> str | None:
 
 
 def read_audio_metadata(mp3_path: Path) -> dict[str, str]:
-    from mutagen.id3 import ID3NoHeaderError
-    from mutagen.mp3 import MP3
-
     try:
+        from mutagen.id3 import ID3NoHeaderError
+        from mutagen.mp3 import MP3
+
         audio = MP3(str(mp3_path))
-    except ID3NoHeaderError:
+    except Exception:
         return {}
 
     tags = audio.tags or {}
@@ -225,17 +225,19 @@ def output_path_for_batch(mp3_path: Path, output_dir: Path | None) -> Path:
     return directory / mp3_path.with_suffix(".mp4").name
 
 
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".wma"}
+
 def find_batch_pairs(folder: Path, random_images: bool = False) -> list[tuple[Path, Path]]:
     import random
 
-    mp3_files = sorted(path for path in folder.iterdir() if path.is_file() and path.suffix.lower() == ".mp3")
+    mp3_files = sorted(path for path in folder.iterdir() if path.is_file() and path.suffix.lower() in AUDIO_EXTENSIONS)
     image_files = sorted(path for path in folder.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS)
     images_by_stem = {path.stem.lower(): path for path in image_files}
 
     if not mp3_files:
-        raise ValueError(f"No MP3 files found in {folder}")
+        raise ValueError(f"No audio files (MP3, WAV, FLAC, etc.) found in {folder}")
     if not image_files:
-        raise ValueError(f"No JPG or PNG images found in {folder}")
+        raise ValueError(f"No supported image files found in {folder}")
 
     pairs = []
     shared_image = image_files[0]

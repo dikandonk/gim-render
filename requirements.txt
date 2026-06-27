@@ -1,8 +1,9 @@
-moviepy
-librosa
-numpy
-pillow
-pillow-heif
-mutagen
-scipy
-tqdm
+moviepy>=2.0,<3.0
+librosa>=0.10,<1.0
+numpy>=1.24,<3.0
+pillow>=10.0,<12.0
+pillow-heif>=0.16,<2.0
+mutagen>=1.46,<2.0
+scipy>=1.11,<2.0
+tqdm>=4.65,<5.0
+yt-dlp>=2024.0

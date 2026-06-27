@@ -7,6 +7,8 @@ import email.policy
 import html
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import threading
 import uuid
@@ -191,12 +193,86 @@ def launch_gui() -> int:
       opacity: 0.72;
     }}
     p {{ color: #9facba; line-height: 1.5; }}
+    .render-bar {{
+      position: sticky;
+      bottom: 0;
+      z-index: 5;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 20px;
+      margin: 24px auto 0;
+      width: min(760px, calc(100vw - 32px));
+      border: 1px solid #2a333d;
+      border-radius: 8px 8px 0 0;
+      background: #171d23;
+      box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
+    }}
+    .render-bar button {{
+      width: auto;
+      padding: 8px 18px;
+    }}
+    .render-time {{
+      color: #5eead4;
+      font-size: 13px;
+      font-weight: 600;
+      margin-left: auto;
+      white-space: nowrap;
+    }}
+    .footer {{
+      text-align: center;
+      padding: 12px;
+      color: #4a5568;
+      font-size: 12px;
+    }}
     @media (max-width: 620px) {{
       .grid {{ grid-template-columns: 1fr; }}
+    }}
+    body.light {{
+      background: #f4f6f8;
+      color: #1a202c;
+    }}
+    body.light main {{
+      color: #1a202c;
+    }}
+    body.light form {{
+      background: #ffffff;
+      border-color: #e2e8f0;
+    }}
+    body.light input, body.light select {{
+      background: #ffffff;
+      color: #1a202c;
+      border-color: #cbd5e1;
+    }}
+    body.light p {{ color: #4a5568; }}
+    body.light .render-bar {{
+      background: #ffffff;
+      border-color: #e2e8f0;
+      box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.1);
+    }}
+    body.light .footer {{ color: #a0aec0; }}
+    body.light .processing-box {{
+      background: #ffffff;
+      border-color: #e2e8f0;
+    }}
+    body.light .processing-title {{ color: #1a202c; }}
+    .theme-toggle {{
+      position: fixed;
+      top: 12px;
+      right: 16px;
+      z-index: 20;
+      cursor: pointer;
+      background: none;
+      border: 0;
+      font-size: 18px;
+      width: auto;
+      min-height: auto;
+      padding: 4px 8px;
     }}
   </style>
 </head>
 <body>
+  <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
   <div id="processing" class="processing">
     <div class="processing-box">
       <p class="processing-title">Processing render...</p>
@@ -212,7 +288,7 @@ def launch_gui() -> int:
     <h2>Single Render</h2>
     <form method="post" action="/render" enctype="multipart/form-data">
       <label>MP3 file
-        <input name="mp3" type="file" accept=".mp3,audio/mpeg" required>
+        <input name="mp3" type="file" accept=".mp3,.wav,.flac,.ogg,.m4a,audio/*" required>
       </label>
       <label>Cover image
         <input name="image" type="file" accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.bmp,.tif,.tiff,image/*" required>
@@ -238,9 +314,16 @@ def launch_gui() -> int:
         </label>
         <label>FPS
           <select name="fps">
-            <option>30</option>
             <option>24</option>
+            <option>30</option>
             <option>60</option>
+          </select>
+        </label>
+        <label>Upscale
+          <select name="internal_scale">
+            <option value="0.5" selected>Fast (0.5x)</option>
+            <option value="0.75">Balanced (0.75x)</option>
+            <option value="1.0">Quality (1.0x)</option>
           </select>
         </label>
         <label>Bands
@@ -251,11 +334,14 @@ def launch_gui() -> int:
         <input name="fast_render" type="checkbox" value="true" checked>
         Fast render mode
       </label>
-      <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Visual Effects</h3>
+      <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Equalizer (Ring)</h3>
       <div class="grid">
-        <label>Image effect
+        <label>Equalizer
           <select name="image_effect">
             <option value="flex">flex</option>
+            <option value="bars">bars</option>
+            <option value="wave">wave</option>
+            <option value="dots">dots</option>
             <option value="none">none</option>
           </select>
         </label>
@@ -270,7 +356,7 @@ def launch_gui() -> int:
           </select>
         </label>
       </div>
-      <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Equalizer</h3>
+      <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Spectrum Bars</h3>
       <div class="grid">
         <label>Spectrum equalizer
           <select name="artwork_equalizer">
@@ -297,6 +383,16 @@ def launch_gui() -> int:
         </label>
         <label>Equalizer bars
           <input name="equalizer_bars" type="number" min="8" max="128" value="{DEFAULT_BANDS}">
+        </label>
+        <label>Spectrum bars
+          <select name="equalizer_style">
+            <option>rounded</option>
+            <option>sharp</option>
+            <option>upward</option>
+            <option>line</option>
+            <option>mirror</option>
+            <option>waveform</option>
+          </select>
         </label>
       </div>
       <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Overlay</h3>
@@ -333,8 +429,8 @@ def launch_gui() -> int:
         </label>
         <label>Video encoder
           <select name="video_encoder">
-            <option>auto</option>
             <option>libx264</option>
+            <option>auto</option>
             <option>h264_videotoolbox</option>
             <option>h264_nvenc</option>
             <option>h264_qsv</option>
@@ -356,6 +452,15 @@ def launch_gui() -> int:
         </label>
         <label>Encoder label
           <input name="encoder_label" type="text" value="Gim Studio 22">
+        </label>
+        <label>Watermark image
+          <input name="watermark_image" type="file" accept=".png,.jpg,.jpeg,image/*">
+        </label>
+        <label>Lyrics (.lrc)
+          <input name="lrc" type="file" accept=".lrc,.txt">
+        </label>
+        <label>Slide interval (s)
+          <input name="image_duration" type="number" min="0" max="120" value="0" placeholder="0 = off">
         </label>
       </div>
       <button type="submit">Render MP4</button>
@@ -378,10 +483,13 @@ def launch_gui() -> int:
       <label>Background image
         <input name="background_image" type="file" accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.bmp,.tif,.tiff,.mp4,.m4v,.mov,.mkv,.webm,.avi,.mpg,.mpeg,image/*,video/*">
       </label>
-      <label>Combined output name
-        <input name="combined_output" type="text" value="combined_gim_video">
-      </label>
-      <div class="grid">
+        <label>Combined output name
+          <input name="combined_output" type="text" value="combined_gim_video">
+        </label>
+        <label>Crossfade (s)
+          <input name="fade_duration" type="number" min="0" max="10" step="0.5" value="0" placeholder="0 = no crossfade">
+        </label>
+        <div class="grid">
         <label>Resolution
           <select name="resolution">
             <option>1280x720</option>
@@ -392,9 +500,16 @@ def launch_gui() -> int:
         </label>
         <label>FPS
           <select name="fps">
-            <option>30</option>
             <option>24</option>
+            <option>30</option>
             <option>60</option>
+          </select>
+        </label>
+        <label>Upscale
+          <select name="internal_scale">
+            <option value="0.5" selected>Fast (0.5x)</option>
+            <option value="0.75">Balanced (0.75x)</option>
+            <option value="1.0">Quality (1.0x)</option>
           </select>
         </label>
         <label>Bands
@@ -405,11 +520,14 @@ def launch_gui() -> int:
         <input name="fast_render" type="checkbox" value="true" checked>
         Fast render mode
       </label>
-      <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Visual Effects</h3>
+      <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Equalizer (Ring)</h3>
       <div class="grid">
-        <label>Image effect
+        <label>Equalizer
           <select name="image_effect">
             <option value="flex">flex</option>
+            <option value="bars">bars</option>
+            <option value="wave">wave</option>
+            <option value="dots">dots</option>
             <option value="none">none</option>
           </select>
         </label>
@@ -424,7 +542,7 @@ def launch_gui() -> int:
           </select>
         </label>
       </div>
-      <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Equalizer</h3>
+      <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Spectrum Bars</h3>
       <div class="grid">
         <label>Spectrum equalizer
           <select name="artwork_equalizer">
@@ -451,6 +569,16 @@ def launch_gui() -> int:
         </label>
         <label>Equalizer bars
           <input name="equalizer_bars" type="number" min="8" max="128" value="{DEFAULT_BANDS}">
+        </label>
+        <label>Spectrum bars
+          <select name="equalizer_style">
+            <option>rounded</option>
+            <option>sharp</option>
+            <option>upward</option>
+            <option>line</option>
+            <option>mirror</option>
+            <option>waveform</option>
+          </select>
         </label>
       </div>
       <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Overlay</h3>
@@ -487,8 +615,8 @@ def launch_gui() -> int:
         </label>
         <label>Video encoder
           <select name="video_encoder">
-            <option>auto</option>
             <option>libx264</option>
+            <option>auto</option>
             <option>h264_videotoolbox</option>
             <option>h264_nvenc</option>
             <option>h264_qsv</option>
@@ -511,6 +639,15 @@ def launch_gui() -> int:
         <label>Encoder label
           <input name="encoder_label" type="text" value="Gim Studio 22">
         </label>
+        <label>Watermark image
+          <input name="watermark_image" type="file" accept=".png,.jpg,.jpeg,image/*">
+        </label>
+        <label>Lyrics (.lrc)
+          <input name="lrc" type="file" accept=".lrc,.txt">
+        </label>
+        <label>Slide interval (s)
+          <input name="image_duration" type="number" min="0" max="120" value="0" placeholder="0 = off">
+        </label>
       </div>
       <label class="check">
         <input name="random_images" type="checkbox" value="true">
@@ -530,7 +667,7 @@ def launch_gui() -> int:
       </label>
       <div id="queueList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
       <div style="display:flex;gap:8px;">
-        <input type="file" id="queueMp3" accept=".mp3,audio/mpeg" style="flex:1;">
+        <input type="file" id="queueMp3" accept=".mp3,.wav,.flac,.ogg,.m4a,audio/*" style="flex:1;">
         <input type="file" id="queueImg" accept=".jpg,.jpeg,.png,.webp,.bmp,image/*" style="flex:1;">
         <button type="button" onclick="addQueueItem()" style="width:auto;padding:6px 14px;">Add</button>
       </div>
@@ -541,9 +678,49 @@ def launch_gui() -> int:
       </label>
       <button type="submit">Render Queue</button>
     </form>
+    <h2>Download</h2>
+    <form method="post" action="/download-yt" enctype="multipart/form-data">
+      <label>YouTube URL
+        <input name="yt_url" type="text" placeholder="https://youtube.com/watch?v=..." required>
+      </label>
+      <label>Output folder
+        <input name="yt_folder" type="text" value="bahan/mp3">
+      </label>
+      <label class="check">
+        <input name="yt_tempo" type="checkbox" value="true">
+        Tempo 6x (output to bahan/suno)
+      </label>
+      <button type="submit">Download</button>
+      <p id="ytStatus" style="margin-top:8px;"></p>
+    </form>
   </main>
+  <div class="render-bar">
+    <button onclick="triggerRender()">Render MP4</button>
+    <button onclick="submitPreview()" style="background:#1a2332;color:#b7c2ce;">Preview 5s</button>
+    <span id="renderTime" class="render-time"></span>
+  </div>
+  <footer class="footer">
+    <p>© GIMBLONG</p>
+  </footer>
   <script>
+    let renderStartTime = 0;
     const queueData = [];
+
+    function toggleTheme() {{
+      const body = document.body;
+      const btn = document.querySelector(".theme-toggle");
+      body.classList.toggle("light");
+      const isLight = body.classList.contains("light");
+      btn.textContent = isLight ? "☀️" : "🌙";
+      localStorage.setItem("theme", isLight ? "light" : "dark");
+    }}
+    (function() {{
+      if (localStorage.getItem("theme") === "light") {{
+        document.body.classList.add("light");
+        document.querySelector(".theme-toggle").textContent = "☀️";
+      }}
+    }})();
+
     function addQueueItem() {{
       const mp3 = document.getElementById("queueMp3").files[0];
       const img = document.getElementById("queueImg").files[0];
@@ -580,13 +757,19 @@ def launch_gui() -> int:
         const response = await fetch("/status/" + jobId);
         const status = await response.json();
         setProgress(status.progress || 0, status.message || "Rendering...");
+        if (renderStartTime && status.progress > 0) {{
+          const elapsed = ((Date.now() - renderStartTime) / 1000).toFixed(1);
+          document.getElementById("renderTime").textContent = elapsed + "s";
+        }}
         if (status.status === "done") {{
-          alert("Render complete\\n\\n" + status.message);
+          const elapsed = renderStartTime ?  " in " + ((Date.now() - renderStartTime) / 1000).toFixed(1) + "s" : "";
+          alert("Render complete" + elapsed + "\\n\\n" + status.message);
           window.location.href = "/";
           return;
         }}
         if (status.status === "error" || status.status === "missing") {{
           alert("Render failed\\n\\n" + status.message);
+          document.getElementById("renderTime").textContent = "";
           window.location.href = "/";
           return;
         }}
@@ -597,6 +780,7 @@ def launch_gui() -> int:
     for (const form of document.querySelectorAll("form")) {{
       form.addEventListener("submit", async event => {{
         event.preventDefault();
+        renderStartTime = Date.now();
         const overlay = document.getElementById("processing");
         const text = document.getElementById("processingText");
         const button = form.querySelector("button[type='submit']");
@@ -625,8 +809,15 @@ def launch_gui() -> int:
       }});
     }}
 
+    function triggerRender() {{
+      const forms = document.querySelectorAll("form");
+      const visible = Array.from(forms).find(f => f.offsetParent !== null) || forms[0];
+      if (visible) visible.requestSubmit();
+    }}
+
     async function submitPreview() {{
       const form = document.querySelector("form[action='/render']");
+      renderStartTime = Date.now();
       const overlay = document.getElementById("processing");
       const text = document.getElementById("processingText");
       if (text) text.textContent = "Rendering 5s preview...";
@@ -648,6 +839,10 @@ def launch_gui() -> int:
         const response = await fetch("/status/" + jobId);
         const status = await response.json();
         setProgress(status.progress || 0, status.message || "Rendering preview...");
+        if (renderStartTime && status.progress > 0) {{
+          const elapsed = ((Date.now() - renderStartTime) / 1000).toFixed(1);
+          document.getElementById("renderTime").textContent = elapsed + "s";
+        }}
         if (status.status === "done") {{
           const video = document.getElementById("previewVideo");
           const player = document.getElementById("previewPlayer");
@@ -663,6 +858,7 @@ def launch_gui() -> int:
         }}
         if (status.status === "error" || status.status === "missing") {{
           alert("Preview failed\\n\\n" + status.message);
+          document.getElementById("renderTime").textContent = "";
           window.location.href = "/";
           return;
         }}
@@ -710,6 +906,40 @@ def launch_gui() -> int:
         parsed = parse_qs(body.decode(errors="replace"), keep_blank_values=True)
         return {key: values[-1] if values else "" for key, values in parsed.items()}
 
+    def yt_worker(url: str, out_dir: Path, tempo: bool, job_id: str) -> None:
+        try:
+            set_job(job_id, status="running", progress=0.1, message="Downloading audio...")
+            result = subprocess.run(
+                ["yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0",
+                 "-o", str(out_dir / "%(title)s.%(ext)s"), url],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                subprocess.run(
+                    [sys.executable, "-m", "yt_dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0",
+                     "-o", str(out_dir / "%(title)s.%(ext)s"), url],
+                    capture_output=True, text=True, check=True,
+                )
+
+            if tempo:
+                set_job(job_id, status="running", progress=0.8, message="Applying tempo 6x...")
+                mp3_files = sorted(out_dir.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if mp3_files:
+                    out_tempo = Path("bahan/suno")
+                    out_tempo.mkdir(parents=True, exist_ok=True)
+                    output = out_tempo / f"{mp3_files[0].stem} - Tempo 6x.mp3"
+                    subprocess.run([
+                        "ffmpeg", "-y", "-i", str(mp3_files[0]),
+                        "-filter:a", "atempo=2.0,atempo=2.0,atempo=1.5",
+                        "-vn", str(output),
+                    ], check=True)
+                    set_job(job_id, status="done", progress=1.0, message=f"Saved: {output}")
+                    return
+
+            set_job(job_id, status="done", progress=1.0, message="Download complete")
+        except Exception as exc:
+            set_job(job_id, status="error", progress=0, message=str(exc))
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path == "/" or self.path == "/index.html":
@@ -753,10 +983,32 @@ def launch_gui() -> int:
             if self.path == "/render-folder":
                 self.render_folder()
                 return
+            if self.path == "/download-yt":
+                self.download_yt()
+                return
             if self.path != "/render":
                 self.send_error(404)
                 return
             self.render_single()
+
+        def download_yt(self) -> None:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length)
+                fields = parse_urlencoded(body)
+                url = fields.get("yt_url", "").strip()
+                if not url:
+                    self.respond_json({"job_id": "", "message": "URL is required"}, 400)
+                    return
+                out_dir = Path(fields.get("yt_folder", "bahan/mp3").strip() or "bahan/mp3")
+                out_dir.mkdir(parents=True, exist_ok=True)
+                tempo = fields.get("yt_tempo") == "true"
+
+                job_id = new_job(f"Download: {url[:60]}")
+                threading.Thread(target=lambda: yt_worker(url, out_dir, tempo, job_id), daemon=True).start()
+                self.respond_json({"job_id": job_id})
+            except Exception as exc:
+                self.respond_json({"job_id": "", "message": str(exc)}, 500)
 
         def render_queue(self) -> None:
             try:
@@ -794,17 +1046,31 @@ def launch_gui() -> int:
                 artwork_equalizer = fields.get("artwork_equalizer", "false") == "true"
                 equalizer_color = fields.get("equalizer_color", "default")
                 equalizer_bars = max(8, min(128, int(fields.get("equalizer_bars", str(DEFAULT_BANDS)))))
+                equalizer_style = fields.get("equalizer_style", "rounded")
                 video_zoom = fields.get("video_zoom", "false") == "true"
                 overlay_enabled = fields.get("overlay_enabled", "false") == "true"
                 overlay_type = fields.get("overlay_type", DEFAULT_OVERLAY_TYPE)
                 overlay_thickness = fields.get("overlay_thickness", DEFAULT_OVERLAY_THICKNESS)
                 fast_render = fields.get("fast_render") == "true"
+                internal_scale = float(fields.get("internal_scale", "0.5"))
                 encoder_preset = fields.get("encoder_preset", DEFAULT_ENCODER_PRESET)
                 threads = max(1, int(fields.get("threads", DEFAULT_THREADS)))
                 video_encoder = fields.get("video_encoder", DEFAULT_VIDEO_ENCODER)
                 crf = max(0, min(51, int(fields.get("crf", str(DEFAULT_CRF)))))
                 encoder_label = fields.get("encoder_label", "Gim Studio 22").strip() or "Gim Studio 22"
                 normalize = fields.get("normalize") == "true"
+                watermark_path = None
+                if files.get("watermark_image"):
+                    wm_name, wm_bytes = files["watermark_image"][0]
+                    watermark_path = upload_dir / wm_name
+                    watermark_path.write_bytes(wm_bytes)
+                image_duration = float(fields.get("image_duration", "0") or 0)
+                lrc_path = None
+                if files.get("lrc"):
+                    lrc_name, lrc_bytes = files["lrc"][0]
+                    lrc_path = upload_dir / lrc_name
+                    lrc_path.write_bytes(lrc_bytes)
+                fade_duration = float(fields.get("fade_duration", "0") or 0)
                 job_id = new_job("Queued queue render")
 
                 def worker() -> None:
@@ -817,7 +1083,8 @@ def launch_gui() -> int:
                                 resolution=resolution, fps=fps, bands=bands,
                                 rotate_image=rotate_image, image_effect=image_effect,
                                 artwork_equalizer=artwork_equalizer, equalizer_color=equalizer_color,
-                                equalizer_bars=equalizer_bars, video_zoom=video_zoom,
+                                equalizer_bars=equalizer_bars,
+                                equalizer_style=equalizer_style, video_zoom=video_zoom,
                                 overlay_enabled=overlay_enabled, overlay_type=overlay_type,
                                 overlay_thickness=overlay_thickness, fast_render=fast_render,
                                 encoder_preset=encoder_preset, threads=threads,
@@ -833,7 +1100,8 @@ def launch_gui() -> int:
                                 resolution=resolution, fps=fps, bands=bands,
                                 rotate_image=rotate_image, image_effect=image_effect,
                                 artwork_equalizer=artwork_equalizer, equalizer_color=equalizer_color,
-                                equalizer_bars=equalizer_bars, video_zoom=video_zoom,
+                                equalizer_bars=equalizer_bars,
+                                equalizer_style=equalizer_style, video_zoom=video_zoom,
                                 overlay_enabled=overlay_enabled, overlay_type=overlay_type,
                                 overlay_thickness=overlay_thickness, fast_render=fast_render,
                                 encoder_preset=encoder_preset, threads=threads,
@@ -882,11 +1150,13 @@ def launch_gui() -> int:
                 artwork_equalizer = fields.get("artwork_equalizer", "false") == "true"
                 equalizer_color = fields.get("equalizer_color", "default")
                 equalizer_bars = max(8, min(128, int(fields.get("equalizer_bars", str(DEFAULT_BANDS)))))
+                equalizer_style = fields.get("equalizer_style", "rounded")
                 video_zoom = fields.get("video_zoom", "false") == "true"
                 overlay_enabled = fields.get("overlay_enabled", "false") == "true"
                 overlay_type = fields.get("overlay_type", DEFAULT_OVERLAY_TYPE)
                 overlay_thickness = fields.get("overlay_thickness", DEFAULT_OVERLAY_THICKNESS)
                 fast_render = fields.get("fast_render") == "true"
+                internal_scale = float(fields.get("internal_scale", "0.5"))
                 encoder_preset = fields.get("encoder_preset", DEFAULT_ENCODER_PRESET)
                 threads = max(1, int(fields.get("threads", DEFAULT_THREADS)))
                 video_encoder = fields.get("video_encoder", DEFAULT_VIDEO_ENCODER)
@@ -913,6 +1183,7 @@ def launch_gui() -> int:
                                 artwork_equalizer=artwork_equalizer,
                                 equalizer_color=equalizer_color,
                                 equalizer_bars=equalizer_bars,
+                                equalizer_style=equalizer_style,
                                 video_zoom=video_zoom,
                                 overlay_enabled=overlay_enabled,
                                 overlay_type=overlay_type,
@@ -924,6 +1195,10 @@ def launch_gui() -> int:
                                 crf=crf,
                                 encoder_label=encoder_label,
                                 normalize=normalize,
+                                watermark_path=watermark_path,
+                                image_duration=image_duration,
+                                lrc_path=lrc_path,
+                                fade_duration=fade_duration,
                                 progress_callback=lambda value: set_job(
                                     job_id, status="running", progress=value, message="Rendering preview...",
                                 ),
@@ -942,17 +1217,23 @@ def launch_gui() -> int:
                                 artwork_equalizer=artwork_equalizer,
                                 equalizer_color=equalizer_color,
                                 equalizer_bars=equalizer_bars,
+                                equalizer_style=equalizer_style,
                                 video_zoom=video_zoom,
                                 overlay_enabled=overlay_enabled,
                                 overlay_type=overlay_type,
                                 overlay_thickness=overlay_thickness,
                                 fast_render=fast_render,
+                                internal_scale=internal_scale,
                                 encoder_preset=encoder_preset,
                                 threads=threads,
                                 video_encoder=video_encoder,
                                 crf=crf,
                                 encoder_label=encoder_label,
                                 normalize=normalize,
+                                watermark_path=watermark_path,
+                                image_duration=image_duration,
+                                lrc_path=lrc_path,
+                                fade_duration=fade_duration,
                                 progress_callback=lambda value: set_job(
                                     job_id, status="running", progress=value, message=f"Rendering {mp3_path.name}",
                                 ),
@@ -996,6 +1277,7 @@ def launch_gui() -> int:
                 artwork_equalizer = fields.get("artwork_equalizer", "false") == "true"
                 equalizer_color = fields.get("equalizer_color", "default")
                 equalizer_bars = max(8, min(128, int(fields.get("equalizer_bars", str(DEFAULT_BANDS)))))
+                equalizer_style = fields.get("equalizer_style", "rounded")
                 video_zoom = fields.get("video_zoom", "false") == "true"
                 overlay_enabled = fields.get("overlay_enabled", "false") == "true"
                 overlay_type = fields.get("overlay_type", DEFAULT_OVERLAY_TYPE)
@@ -1084,11 +1366,13 @@ def launch_gui() -> int:
                 artwork_equalizer = fields.get("artwork_equalizer", "false") == "true"
                 equalizer_color = fields.get("equalizer_color", "default")
                 equalizer_bars = max(8, min(128, int(fields.get("equalizer_bars", str(DEFAULT_BANDS)))))
+                equalizer_style = fields.get("equalizer_style", "rounded")
                 video_zoom = fields.get("video_zoom", "false") == "true"
                 overlay_enabled = fields.get("overlay_enabled", "false") == "true"
                 overlay_type = fields.get("overlay_type", DEFAULT_OVERLAY_TYPE)
                 overlay_thickness = fields.get("overlay_thickness", DEFAULT_OVERLAY_THICKNESS)
                 fast_render = fields.get("fast_render") == "true"
+                internal_scale = float(fields.get("internal_scale", "0.5"))
                 encoder_preset = fields.get("encoder_preset", DEFAULT_ENCODER_PRESET)
                 threads = max(1, int(fields.get("threads", DEFAULT_THREADS)))
                 video_encoder = fields.get("video_encoder", DEFAULT_VIDEO_ENCODER)
@@ -1113,17 +1397,23 @@ def launch_gui() -> int:
                                 artwork_equalizer=artwork_equalizer,
                                 equalizer_color=equalizer_color,
                                 equalizer_bars=equalizer_bars,
+                                equalizer_style=equalizer_style,
                                 video_zoom=video_zoom,
                                 overlay_enabled=overlay_enabled,
                                 overlay_type=overlay_type,
                                 overlay_thickness=overlay_thickness,
                                 fast_render=fast_render,
+                                internal_scale=internal_scale,
                                 encoder_preset=encoder_preset,
                                 threads=threads,
                                 video_encoder=video_encoder,
                                 crf=crf,
                                 encoder_label=encoder_label,
                                 normalize=normalize,
+                                watermark_path=watermark_path,
+                                image_duration=image_duration,
+                                lrc_path=lrc_path,
+                                fade_duration=fade_duration,
                                 progress_callback=lambda value: set_job(
                                     job_id,
                                     status="running",

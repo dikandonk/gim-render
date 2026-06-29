@@ -7,7 +7,6 @@ Generate professional music visualizer videos from audio + cover image. Audio-re
 
 ## Windows
 [![Download](https://img.shields.io/badge/Download-v1.6-2dd4bf?style=for-the-badge)](https://github.com/dikandonk/gim-render/releases/download/v2.0.22/gim-render-windows.zip)
-![Screenshot](assets/screenshot.png)
 
 ## Quick Start
 
@@ -124,6 +123,9 @@ python main.py song.wav cover.jpg
 - Light/dark theme toggle (persisted)
 - Render elapsed time display
 - WAV, FLAC, OGG, M4A audio input support
+
+## APP Screenshoot
+![Screenshot](assets/screenshot.png)
 
 ## Requirements
 

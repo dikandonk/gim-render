@@ -12,3 +12,6 @@ build/
 *.spec.bak
 .vscode/
 .DS_Store
+bahan/
+*.zip
+musik-v2.0.22/

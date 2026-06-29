@@ -153,7 +153,11 @@ class VisualizerApp:
         footer = ttk.Frame(bottom_bar)
         footer.pack(fill="x", pady=(8, 0))
         ttk.Separator(footer, orient="horizontal").pack(fill="x", pady=(0, 4))
-        ttk.Label(footer, text="© GIMBLONG", foreground="#4a5568", background="#101418", font=("Helvetica", 9)).pack(pady=(0, 4))
+        ttk.Label(footer, text="© GIMBLONG", foreground="#4a5568", background="#101418", font=("Helvetica", 9)).pack(pady=(0, 2))
+        from render import resolve_video_encoder
+        import platform
+        plat_info = f"{platform.system()} {platform.machine()} • {resolve_video_encoder('auto')}"
+        ttk.Label(footer, text=plat_info, foreground="#3a4555", background="#101418", font=("Helvetica", 8)).pack(pady=(0, 4))
 
     def _toggle_theme(self) -> None:
         self._dark_theme = not self._dark_theme
@@ -597,7 +601,6 @@ class VisualizerApp:
             watermark_path=Path(self.watermark_var.get()) if self.watermark_var.get() else None,
             image_duration=float(self.image_dur_var.get() or 0),
             lrc_path=Path(self.lrc_var.get()) if self.lrc_var.get() else None,
-            fade_duration=float(self.fade_dur_var.get() or 0),
         )
 
     def _start_render(self) -> None:
@@ -737,6 +740,7 @@ class VisualizerApp:
             if combine and combined_out:
                 result = render_combined_folder(
                     pairs=pairs, background_path=bg, output_path=combined_out,
+                    fade_duration=float(self.fade_dur_var.get() or 0),
                     progress_callback=progress, **s,
                 )
                 elapsed = time.time() - start
@@ -777,6 +781,7 @@ class VisualizerApp:
                 combined_out = Path("output") / "combined_queue.mp4"
                 result = render_combined_folder(
                     pairs=pairs, background_path=fallback_bg, output_path=combined_out,
+                    fade_duration=float(self.fade_dur_var.get() or 0),
                     progress_callback=progress, **s,
                 )
                 elapsed = time.time() - start

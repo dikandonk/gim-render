@@ -28,7 +28,7 @@ from constants import (
     DEFAULT_THREADS,
     DEFAULT_VIDEO_ENCODER,
 )
-from render import render_batch, render_combined_folder, render_preview, render_video
+from render import render_batch, render_combined_folder, render_preview, render_video, resolve_video_encoder
 from utils import find_batch_pairs, parse_resolution
 
 
@@ -72,6 +72,8 @@ def launch_gui() -> int:
         if message:
             title = "Render failed" if is_error else "Render complete"
             alert_script = f"<script>window.addEventListener('load', () => alert({title!r} + '\\n\\n' + {message!r}));</script>"
+        import platform as _plat
+        platform_info = f"{_plat.system()} {_plat.machine()} • {resolve_video_encoder('auto')}"
         return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -193,32 +195,6 @@ def launch_gui() -> int:
       opacity: 0.72;
     }}
     p {{ color: #9facba; line-height: 1.5; }}
-    .render-bar {{
-      position: sticky;
-      bottom: 0;
-      z-index: 5;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      padding: 12px 20px;
-      margin: 24px auto 0;
-      width: min(760px, calc(100vw - 32px));
-      border: 1px solid #2a333d;
-      border-radius: 8px 8px 0 0;
-      background: #171d23;
-      box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
-    }}
-    .render-bar button {{
-      width: auto;
-      padding: 8px 18px;
-    }}
-    .render-time {{
-      color: #5eead4;
-      font-size: 13px;
-      font-weight: 600;
-      margin-left: auto;
-      white-space: nowrap;
-    }}
     .footer {{
       text-align: center;
       padding: 12px;
@@ -245,11 +221,6 @@ def launch_gui() -> int:
       border-color: #cbd5e1;
     }}
     body.light p {{ color: #4a5568; }}
-    body.light .render-bar {{
-      background: #ffffff;
-      border-color: #e2e8f0;
-      box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.1);
-    }}
     body.light .footer {{ color: #a0aec0; }}
     body.light .processing-box {{
       background: #ffffff;
@@ -269,6 +240,18 @@ def launch_gui() -> int:
       min-height: auto;
       padding: 4px 8px;
     }}
+    .tabs {{ display: flex; gap: 0; margin-bottom: 16px; }}
+    .tab {{
+      padding: 10px 20px; cursor: pointer; border: 0;
+      background: #1a2332; color: #9facba; font: inherit;
+      font-size: 13px; font-weight: 600; border-radius: 6px 6px 0 0;
+      margin-right: 2px;
+    }}
+    .tab.active {{ background: #2a3441; color: #2dd4bf; }}
+    .tab-content {{ display: none; }}
+    .tab-content.active {{ display: block; }}
+    .inline-bar {{ display: none; height: 4px; margin-top: 8px; border-radius: 99px; overflow: hidden; background: #0f1419; }}
+    .inline-bar-fill {{ display: block; height: 100%; width: 0; background: #2dd4bf; transition: width 0.5s; }}
   </style>
 </head>
 <body>
@@ -285,6 +268,13 @@ def launch_gui() -> int:
     <h1>GIM RENDER</h1>
     <p>Choose one MP3 and image, or render a folder where each MP3 matches an image with the same filename.</p>
     {message_block}
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('single')">Single Render</button>
+      <button class="tab" onclick="switchTab('multi')">Multi Render</button>
+      <button class="tab" onclick="switchTab('queue')">Queue</button>
+      <button class="tab" onclick="switchTab('download')">Download</button>
+    </div>
+    <div id="tab-single" class="tab-content active">
     <h2>Single Render</h2>
     <form method="post" action="/render" enctype="multipart/form-data">
       <label>MP3 file
@@ -464,12 +454,15 @@ def launch_gui() -> int:
         </label>
       </div>
       <button type="submit">Render MP4</button>
+      <div class="inline-bar"><div class="inline-bar-fill"></div></div>
       <button type="button" onclick="submitPreview()" style="background:#1a2332;color:#b7c2ce;margin-top:4px;">Preview 5s</button>
       <div id="previewPlayer" style="display:none;margin-top:8px;">
         <video id="previewVideo" controls width="100%" style="border-radius:6px;"></video>
       </div>
-    </form>
-    <h2>Multi Render</h2>
+     </form>
+     </div>
+     <div id="tab-multi" class="tab-content">
+     <h2>Multi Render</h2>
     <form method="post" action="/render-folder" enctype="multipart/form-data">
       <label>Choose folder files
         <input name="folder_files" type="file" webkitdirectory directory multiple>
@@ -658,8 +651,10 @@ def launch_gui() -> int:
         Combine all songs into one video
       </label>
       <button type="submit">Render Multi</button>
-    </form>
-    <h2>Queue</h2>
+     </form>
+     </div>
+     <div id="tab-queue" class="tab-content">
+     <h2>Queue</h2>
     <form method="post" action="/render-queue" enctype="multipart/form-data">
       <p>Add MP3 + image logo + background one by one, then render all at once.</p>
       <label>Background (optional)
@@ -667,7 +662,7 @@ def launch_gui() -> int:
       </label>
       <div id="queueList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
       <div style="display:flex;gap:8px;">
-        <input type="file" id="queueMp3" accept=".mp3,.wav,.flac,.ogg,.m4a,audio/*" style="flex:1;">
+        <input type="file" id="queueMp3" accept=".mp3,.wav,.flac,.ogg,.m4a,.aac,.opus,audio/*" style="flex:1;">
         <input type="file" id="queueImg" accept=".jpg,.jpeg,.png,.webp,.bmp,image/*" style="flex:1;">
         <button type="button" onclick="addQueueItem()" style="width:auto;padding:6px 14px;">Add</button>
       </div>
@@ -676,9 +671,63 @@ def launch_gui() -> int:
         <input name="queue_combine" type="checkbox" value="true">
         Combine all into one video
       </label>
-      <button type="submit">Render Queue</button>
-    </form>
-    <h2>Download</h2>
+
+
+    <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Video</h3>
+    <div class="grid">
+    <label>Resolution<select name="resolution"><option>1280x720</option><option>1920x1080</option><option>854x480</option><option>426x240</option></select></label>
+    <label>FPS<select name="fps"><option>24</option><option>30</option><option>60</option></select></label>
+    <label>Upscale<select name="internal_scale"><option value="0.5">Fast (0.5x)</option><option value="0.75">Balanced (0.75x)</option><option value="1.0">Quality (1.0x)</option></select></label>
+    </div>
+    <label class="check"><input name="fast_render" type="checkbox"> Fast render</label>
+    <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Equalizer Ring</h3>
+    <label class="check"><input name="artwork_equalizer" type="checkbox" checked> Enable ring equalizer</label>
+    <div class="grid">
+    <label>Style<select name="image_effect"><option>flex</option><option>bars</option><option>wave</option><option>dots</option><option>none</option></select></label>
+    <label>Color<select name="equalizer_color"><option>default</option><option>cyan</option><option>pink</option><option>amber</option><option>green</option><option>purple</option><option>white</option><option>blue</option><option>red</option><option>orange</option><option>teal</option><option>violet</option><option>lime</option></select></label>
+    <label>Bars <input name="equalizer_bars" type="number" min="8" max="128" value="32"></label>
+    </div>
+    <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Spectrum Bars</h3>
+    <div class="grid">
+    <label>Style<select name="equalizer_style"><option>rounded</option><option>sharp</option><option>upward</option><option>line</option><option>mirror</option><option>waveform</option></select></label>
+    <label>Bands <input name="bands" type="number" min="16" max="96" value="32"></label>
+    <label class="check"><input name="video_zoom" type="checkbox"> Video zoom</label>
+    </div>
+    <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Overlay</h3>
+    <label class="check"><input name="overlay_enabled" type="checkbox"> Rain/snow overlay</label>
+    <div class="grid">
+    <label>Type<select name="overlay_type"><option>rain</option><option>snow</option></select></label>
+    <label>Thickness<select name="overlay_thickness"><option>thin</option><option>medium</option><option>thick</option></select></label>
+    </div>
+    <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Encoding</h3>
+    <div class="grid">
+    <label>Encoder<select name="video_encoder"><option>libx264</option><option>auto</option><option>h264_videotoolbox</option><option>h264_nvenc</option><option>h264_qsv</option><option>h264_amf</option><option>h264_vaapi</option></select></label>
+    <label>Preset<select name="encoder_preset"><option>ultrafast</option><option>superfast</option><option>veryfast</option><option>faster</option><option>fast</option><option>medium</option></select></label>
+    <label>CRF <input name="crf" type="number" min="0" max="51" value="25"></label>
+    <label>Threads <input name="threads" type="number" min="1" max="128" value="8"></label>
+    </div>
+    <label class="check"><input name="normalize" type="checkbox"> Normalize audio</label>
+    <label>Encoder label <input name="encoder_label" type="text" value="Gim Studio 22"></label>
+    <h3 style="color:#2dd4bf;margin:12px 0 6px;font-size:13px;">Extras</h3>
+    <label>Watermark <input name="watermark_image" type="file" accept=".png,.jpg,.jpeg,image/*"></label>
+    <label>Lyrics (.lrc) <input name="lrc" type="file" accept=".lrc,.txt"></label>
+    <div class="grid">
+    <label>Slide <input name="image_duration" type="number" min="0" max="120" value="0" placeholder="s"></label>
+    <label>Crossfade <input name="fade_duration" type="number" min="0" max="10" step="0.5" value="0"></label>
+    </div>
+      
+    <div class="grid">
+    <label>Resolution<select name="resolution"><option>1280x720</option><option>1920x1080</option><option>854x480</option><option>426x240</option></select></label>
+    <label>FPS<select name="fps"><option>24</option><option>30</option><option>60</option></select></label>
+    <label>Encoder<select name="video_encoder"><option>libx264</option><option>auto</option><option>h264_videotoolbox</option><option>h264_nvenc</option></select></label>
+    </div>
+    <label class="check"><input name="fast_render" type="checkbox"> Fast render</label>
+    <label class="check"><input name="overlay_enabled" type="checkbox"> Overlay rain/snow</label>
+          <button type="submit">Render Queue</button>
+     </form>
+     </div>
+     <div id="tab-download" class="tab-content">
+     <h2>Download</h2>
     <form method="post" action="/download-yt" enctype="multipart/form-data">
       <label>YouTube URL
         <input name="yt_url" type="text" placeholder="https://youtube.com/watch?v=..." required>
@@ -693,18 +742,33 @@ def launch_gui() -> int:
       <button type="submit">Download</button>
       <p id="ytStatus" style="margin-top:8px;"></p>
     </form>
+     </div>
+     </div>
   </main>
-  <div class="render-bar">
-    <button onclick="triggerRender()">Render MP4</button>
-    <button onclick="submitPreview()" style="background:#1a2332;color:#b7c2ce;">Preview 5s</button>
-    <span id="renderTime" class="render-time"></span>
-  </div>
   <footer class="footer">
     <p>© GIMBLONG</p>
+    <p style="font-size:11px;color:#3a4555;margin:2px 0 0;">{platform_info}</p>
   </footer>
   <script>
     let renderStartTime = 0;
     const queueData = [];
+
+    function showToast(msg, type) {{
+      const t = document.createElement("div");
+      t.textContent = msg;
+      t.style.cssText = "position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:100;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px;box-shadow:0 4px 20px rgba(0,0,0,0.4);white-space:pre-line;" + (type === "success" ? "background:#12352f;color:#b9fff4;border:1px solid#2dd4bf;" : "background:#3a151a;color:#ffd0d6;border:1px solid#ff5c6c;");
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 4000);
+    }}
+
+    function switchTab(name) {{
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      const tabBtn = document.querySelector('.tab[onclick*="'+name+'"]');
+      if (tabBtn) tabBtn.classList.add('active');
+      const content = document.getElementById('tab-' + name);
+      if (content) content.classList.add('active');
+    }}
 
     function toggleTheme() {{
       const body = document.body;
@@ -759,7 +823,7 @@ def launch_gui() -> int:
         setProgress(status.progress || 0, status.message || "Rendering...");
         if (renderStartTime && status.progress > 0) {{
           const elapsed = ((Date.now() - renderStartTime) / 1000).toFixed(1);
-          document.getElementById("renderTime").textContent = elapsed + "s";
+
         }}
         if (status.status === "done") {{
           const elapsed = renderStartTime ?  " in " + ((Date.now() - renderStartTime) / 1000).toFixed(1) + "s" : "";
@@ -769,7 +833,7 @@ def launch_gui() -> int:
         }}
         if (status.status === "error" || status.status === "missing") {{
           alert("Render failed\\n\\n" + status.message);
-          document.getElementById("renderTime").textContent = "";
+
           window.location.href = "/";
           return;
         }}
@@ -780,58 +844,69 @@ def launch_gui() -> int:
     for (const form of document.querySelectorAll("form")) {{
       form.addEventListener("submit", async event => {{
         event.preventDefault();
-        renderStartTime = Date.now();
-        const overlay = document.getElementById("processing");
-        const text = document.getElementById("processingText");
         const button = form.querySelector("button[type='submit']");
         if (button) {{
           button.disabled = true;
-          button.textContent = "Processing...";
+          const orig = button.textContent;
+          button.setAttribute("data-original", orig);
+          button.textContent = "Rendering...";
         }}
-        if (text) {{
-          text.textContent = form.action.endsWith("/render-folder")
-            ? "Rendering folder. This can take a while for many songs."
-            : "Rendering video. This can take a while for long audio.";
-        }}
-        if (overlay) overlay.style.display = "flex";
-        setProgress(0.01, text ? text.textContent : "Starting render...");
         try {{
           const hasFileInput = Boolean(form.querySelector("input[type='file']"));
-          const body = hasFileInput ? new FormData(form) : new URLSearchParams(new FormData(form));
+          let body = hasFileInput ? new FormData(form) : new URLSearchParams(new FormData(form));
+
           const response = await fetch(form.action, {{ method: "POST", body }});
           const payload = await response.json();
           if (!response.ok) throw new Error(payload.message || "Failed to start render");
-          pollJob(payload.job_id);
+          while (true) {{
+            await new Promise(r => setTimeout(r, 2000));
+            const r2 = await fetch("/status/" + payload.job_id);
+            const s = await r2.json();
+            if (s.status === "done") {{ showToast("Render complete!\\n" + s.message, "success"); break; }}
+            if (s.status === "error") {{ showToast("Render failed: " + s.message, "error"); break; }}
+          }}
         }} catch (error) {{
-          alert("Render failed\\n\\n" + error.message);
-          window.location.href = "/";
+          showToast("Error: " + error.message, "error");
+        }}
+        if (button) {{
+          button.disabled = false;
+          button.textContent = button.getAttribute("data-original") || "Render";
         }}
       }});
     }}
 
-    function triggerRender() {{
-      const forms = document.querySelectorAll("form");
-      const visible = Array.from(forms).find(f => f.offsetParent !== null) || forms[0];
-      if (visible) visible.requestSubmit();
-    }}
-
     async function submitPreview() {{
       const form = document.querySelector("form[action='/render']");
-      renderStartTime = Date.now();
-      const overlay = document.getElementById("processing");
-      const text = document.getElementById("processingText");
-      if (text) text.textContent = "Rendering 5s preview...";
-      if (overlay) overlay.style.display = "flex";
-      setProgress(0.01, "Starting preview...");
+      const button = form.querySelector("button[type='submit']");
+      if (button) {{ button.disabled = true; button.textContent = "Rendering preview..."; }}
       try {{
-        const response = await fetch("/preview", {{ method: "POST", body: new FormData(form) }});
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.message || "Failed to start preview");
-        pollPreview(payload.job_id);
+        const r = await fetch("/preview", {{ method: "POST", body: new FormData(form) }});
+        const p = await r.json();
+        if (!r.ok) throw new Error(p.message || "Failed");
+        while (true) {{
+          await new Promise(r => setTimeout(r, 1000));
+          const r2 = await fetch("/status/" + p.job_id);
+          const s = await r2.json();
+          if (s.status === "done") {{
+            const m = s.message || "";
+            const match = m.match(/Preview: (.+)/);
+            if (match) {{
+              const vid = document.getElementById("previewVideo");
+              const player = document.getElementById("previewPlayer");
+              if (player && vid) {{
+                player.style.display = "block";
+                vid.src = "/download/" + encodeURIComponent(match[1]);
+                vid.play();
+              }}
+            }}
+            break;
+          }}
+          if (s.status === "error") {{ showToast("Preview failed: " + s.message, "error"); break; }}
+        }}
       }} catch (error) {{
-        alert("Preview failed\\n\\n" + error.message);
-        window.location.href = "/";
+        showToast("Preview failed: " + error.message, "error");
       }}
+      if (button) {{ button.disabled = false; button.textContent = "Preview 5s"; }}
     }}
 
     async function pollPreview(jobId) {{
@@ -841,7 +916,7 @@ def launch_gui() -> int:
         setProgress(status.progress || 0, status.message || "Rendering preview...");
         if (renderStartTime && status.progress > 0) {{
           const elapsed = ((Date.now() - renderStartTime) / 1000).toFixed(1);
-          document.getElementById("renderTime").textContent = elapsed + "s";
+
         }}
         if (status.status === "done") {{
           const video = document.getElementById("previewVideo");
@@ -858,7 +933,7 @@ def launch_gui() -> int:
         }}
         if (status.status === "error" || status.status === "missing") {{
           alert("Preview failed\\n\\n" + status.message);
-          document.getElementById("renderTime").textContent = "";
+
           window.location.href = "/";
           return;
         }}
@@ -1022,14 +1097,32 @@ def launch_gui() -> int:
                     files = {}
                 queue_pairs_raw = fields.get("queue_pairs", "")
                 pairs = []
-                for part in queue_pairs_raw.split("||"):
-                    if "::" not in part:
-                        continue
-                    mp3_name, img_name = part.split("::", 1)
-                    mp3_path = upload_dir / mp3_name
-                    img_path = upload_dir / img_name
-                    if mp3_path.exists() and img_path.exists():
-                        pairs.append((mp3_path, img_path))
+                # Try uploaded queue files first
+                uploaded_pairs = []
+                for key in sorted(files.keys()):
+                    if key.startswith("queue_mp3_"):
+                        idx = key.split("_")[-1]
+                        img_key = f"queue_img_{idx}"
+                        if img_key in files:
+                            mp3_name, mp3_bytes = files[key][0]
+                            img_name, img_bytes = files[img_key][0]
+                            mp3_path = upload_dir / mp3_name
+                            img_path = upload_dir / img_name
+                            mp3_path.write_bytes(mp3_bytes)
+                            img_path.write_bytes(img_bytes)
+                            uploaded_pairs.append((mp3_path, img_path))
+                if uploaded_pairs:
+                    pairs = uploaded_pairs
+                else:
+                    # Fallback: read from queue_pairs field (files already in upload_dir)
+                    for part in queue_pairs_raw.split("||"):
+                        if "::" not in part:
+                            continue
+                        mp3_name, img_name = part.split("::", 1)
+                        mp3_path = upload_dir / mp3_name
+                        img_path = upload_dir / img_name
+                        if mp3_path.exists() and img_path.exists():
+                            pairs.append((mp3_path, img_path))
                 if not pairs:
                     raise ValueError("No queue items. Add at least one MP3 + image pair.")
                 bg_path = None
@@ -1163,6 +1256,17 @@ def launch_gui() -> int:
                 crf = max(0, min(51, int(fields.get("crf", str(DEFAULT_CRF)))))
                 encoder_label = fields.get("encoder_label", "Gim Studio 22").strip() or "Gim Studio 22"
                 normalize = fields.get("normalize") == "true"
+                watermark_path = None
+                if files.get("watermark_image"):
+                    wm_name, wm_bytes = files["watermark_image"][0]
+                    watermark_path = upload_dir / wm_name
+                    watermark_path.write_bytes(wm_bytes)
+                image_duration = float(fields.get("image_duration", "0") or 0)
+                lrc_path = None
+                if files.get("lrc"):
+                    lrc_name, lrc_bytes = files["lrc"][0]
+                    lrc_path = upload_dir / lrc_name
+                    lrc_path.write_bytes(lrc_bytes)
                 job_id = new_job("Queued single render")
 
                 def worker(preview: bool = False) -> None:
@@ -1233,7 +1337,6 @@ def launch_gui() -> int:
                                 watermark_path=watermark_path,
                                 image_duration=image_duration,
                                 lrc_path=lrc_path,
-                                fade_duration=fade_duration,
                                 progress_callback=lambda value: set_job(
                                     job_id, status="running", progress=value, message=f"Rendering {mp3_path.name}",
                                 ),
@@ -1379,6 +1482,18 @@ def launch_gui() -> int:
                 crf = max(0, min(51, int(fields.get("crf", str(DEFAULT_CRF)))))
                 encoder_label = fields.get("encoder_label", "Gim Studio 22").strip() or "Gim Studio 22"
                 normalize = fields.get("normalize") == "true"
+                watermark_path = None
+                if files.get("watermark_image"):
+                    wm_name, wm_bytes = files["watermark_image"][0]
+                    watermark_path = upload_dir / wm_name
+                    watermark_path.write_bytes(wm_bytes)
+                image_duration = float(fields.get("image_duration", "0") or 0)
+                lrc_path = None
+                if files.get("lrc"):
+                    lrc_name, lrc_bytes = files["lrc"][0]
+                    lrc_path = upload_dir / lrc_name
+                    lrc_path.write_bytes(lrc_bytes)
+                fade_duration = float(fields.get("fade_duration", "0") or 0)
                 job_id = new_job("Queued folder render")
 
                 def worker() -> None:
@@ -1413,7 +1528,6 @@ def launch_gui() -> int:
                                 watermark_path=watermark_path,
                                 image_duration=image_duration,
                                 lrc_path=lrc_path,
-                                fade_duration=fade_duration,
                                 progress_callback=lambda value: set_job(
                                     job_id,
                                     status="running",

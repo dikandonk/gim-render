@@ -294,7 +294,7 @@ def main() -> int:
             current_track_index=args.segment_current_track_index,
             fast_render=bool(args.segment_fast_render),
             internal_scale=args.segment_internal_scale or 0.5,
-            watermark_path=args.segment_watermark or None,
+            watermark_path=args.segment_watermark if args.segment_watermark and args.segment_watermark.name else None,
             image_duration=args.segment_image_duration or 0.0,
             encoder_preset=args.segment_encoder_preset if args.segment_encoder_preset in ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium") else DEFAULT_ENCODER_PRESET,
             threads=max(1, args.segment_threads or DEFAULT_THREADS),

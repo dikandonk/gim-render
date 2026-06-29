@@ -361,7 +361,7 @@ def render_video(
         metadata = read_audio_metadata(actual_mp3)
         resolved_encoder = resolve_video_encoder(video_encoder)
         if progress_callback:
-            progress_callback(0.02)
+            progress_callback(0.05)
 
         visualizer = Visualizer(
             image_path=image_path,
@@ -397,6 +397,9 @@ def render_video(
         audio = AudioFileClip(str(actual_mp3))
         clip = VideoClip(visualizer.make_frame, duration=visualizer.analysis.duration).with_fps(fps)
         clip = clip.with_audio(audio)
+
+        if progress_callback:
+            progress_callback(0.95)
 
         try:
             try:
@@ -708,7 +711,7 @@ def render_video_parallel(
 
         if progress_callback:
             progress_callback(0.94)
-        result = concat_videos([path for path, _ in segment_paths], output)
+        result = concat_videos([path for path, _ in segment_paths], output, crf=crf, fade_duration=0.05)
         if progress_callback:
             progress_callback(1.0)
         return result
@@ -734,6 +737,7 @@ def render_batch(
     encoder_preset: str,
     threads: int,
     video_encoder: str,
+    equalizer_style: str = "rounded",
     crf: int = DEFAULT_CRF,
     encoder_label: str = "Gim Studio 22",
     normalize: bool = False,
@@ -878,6 +882,7 @@ def render_combined_folder(
     encoder_preset: str,
     threads: int,
     video_encoder: str,
+    equalizer_style: str = "rounded",
     crf: int = DEFAULT_CRF,
     encoder_label: str = "Gim Studio 22",
     normalize: bool = False,

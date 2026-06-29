@@ -137,8 +137,8 @@ class Visualizer:
         self.resize_filter = Image.Resampling.BILINEAR if fast_render else Image.Resampling.LANCZOS
         self.rotate_filter = Image.Resampling.BILINEAR if fast_render else Image.Resampling.BICUBIC
         self.font_large = self._font(38)
-        self.font_playlist = self._font(22)
-        self.font_playlist_bold = self._font(24, bold=True)
+        self.font_playlist = self._font(8)
+        self.font_playlist_bold = self._font(9, bold=True)
         self.visual_spectrum = np.zeros(self.bands, dtype=np.float32)
         self.frame_bar = tqdm(total=self.analysis.frame_count, desc="Rendering frames")
         self._tqdm_pending = 0
@@ -213,9 +213,7 @@ class Visualizer:
         self._draw_overlay(image, global_time, energy)
         self._draw_artwork(image, energy, spectrum, global_time)
         if not silent:
-            self._draw_equalizer(draw, self.visual_spectrum, energy, time_seconds)
-        if self.playlist_titles:
-            self._draw_text(draw)
+            self._draw_equalizer(draw, self.visual_spectrum, energy)
         self._draw_playlist(draw)
         self._draw_lrc(draw, global_time)
         self._draw_vignette(image)
@@ -291,12 +289,18 @@ class Visualizer:
         duration = float(self.overlay_clip.duration or 0.0)
         if duration > 0:
             time_seconds = time_seconds % duration
+        key = int(time_seconds * 10)
+        if not hasattr(self, "_overlay_cache"):
+            self._overlay_cache = {}
+        if key in self._overlay_cache:
+            return self._overlay_cache[key].copy()
         frame = Image.fromarray(self.overlay_clip.get_frame(time_seconds)).convert("RGB")
         frame = self._fit_background_frame(frame, (self.width, self.height)).convert("RGBA")
         luminance = frame.convert("L")
         alpha = luminance.point(lambda value: 0 if value < 10 else 65)
         frame.putalpha(alpha)
-        return frame
+        self._overlay_cache[key] = frame
+        return frame.copy()
 
     def _prepare_vignette(self) -> Image.Image:
         y, x = np.ogrid[: self.height, : self.width]
@@ -665,16 +669,9 @@ class Visualizer:
 
         max_items = min(len(self.playlist_titles), 12)
         x = int(self.width * 0.055)
-        y = int(self.height * 0.08)
-        max_width = int(self.width * 0.33)
+        y = int(self.height * 0.48)
+        max_width = int(self.width * 0.26)
         line_height = max(22, int(self.height * 0.034))
-
-        panel_height = line_height * max_items + 28
-        draw.rounded_rectangle(
-            (x - 14, y - 14, x + max_width + 14, y + panel_height),
-            radius=8,
-            fill=(0, 0, 0, 88),
-        )
 
         total = len(self.playlist_titles)
         start = 0
@@ -689,12 +686,12 @@ class Visualizer:
             prefix = "> " if is_current else "  "
             text = self._fit_text(draw, prefix + title, font, max_width)
             text_y = y + visible_index * line_height
-            fill = (255, 255, 255, 245) if is_current else (255, 255, 255, 135)
+            fill = (255, 255, 255, 220) if is_current else (255, 255, 255, 120)
             if is_current:
                 draw.rounded_rectangle(
                     (x - 6, text_y - 3, x + max_width + 6, text_y + line_height - 2),
                     radius=5,
-                    fill=(45, 212, 191, 70),
+                    fill=(0, 0, 0, 130),
                 )
             draw.text((x, text_y), text, font=font, fill=fill)
 

@@ -2,8 +2,11 @@
 
 Generate professional music visualizer videos from audio + cover image. Audio-reactive spectrum equalizer, overlay effects, lyrics sync, and YouTube download.
 
+## MAC/Linux
 [![Download](https://img.shields.io/badge/Download-v1.6-2dd4bf?style=for-the-badge)](https://github.com/dikandonk/gim-render/releases/download/v2.0.22/gimrender-v2.0.22.zip)
 
+## Windows
+[![Download](https://img.shields.io/badge/Download-v1.6-2dd4bf?style=for-the-badge)](https://github.com/dikandonk/gim-render/releases/download/v2.0.22/gim-render-windows.zip)
 ![Screenshot](assets/screenshot.png)
 
 ## Quick Start
